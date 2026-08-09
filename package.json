@@ -1,0 +1,68 @@
+{
+  "name": "kawaicord",
+  "version": "1.0.0",
+  "description": "A polished Discord web client with Shelter and switchable Vencord or Equicord support",
+  "main": "dist/main.js",
+  "scripts": {
+    "start": "npm run build && electron .",
+    "build": "tsc",
+    "dev": "npm run build && electron .",
+    "watch": "tsc -w",
+    "package": "npm run build && electron-builder --win nsis",
+    "package:dir": "npm run build && electron-builder --dir"
+  },
+  "author": "Kawaicord contributors",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "arrpc": "^3.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "electron": "^43.3.0",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.0.0"
+  },
+  "build": {
+    "appId": "com.kawaicord.app",
+    "productName": "Kawaicord",
+    "icon": "icons/icon.ico",
+    "asar": true,
+    "compression": "maximum",
+    "artifactName": "Kawaicord-Setup-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "icons/**/*",
+      "vencord/**/*",
+      "equicord/**/*",
+      "shelter/**/*",
+      "plugins/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icons/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false,
+      "installerIcon": "icons/icon.ico",
+      "uninstallerIcon": "icons/icon.ico",
+      "shortcutName": "Kawaicord"
+    }
+  }
+}

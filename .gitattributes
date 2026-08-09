@@ -1,0 +1,8 @@
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+
+# Generated upstream bundles contain whitespace inside template literals.
+vencord/*.js whitespace=-trailing-space
+equicord/*.js whitespace=-trailing-space
