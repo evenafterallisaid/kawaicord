@@ -34,7 +34,7 @@ jobs:
         run: npm audit --omit=dev
 
       - name: Build installer
-        run: npm run package
+        run: npm run package -- --publish never
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
