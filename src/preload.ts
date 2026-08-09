@@ -1,4 +1,5 @@
 import { ipcRenderer, webFrame } from 'electron';
+import { routeClientModRestarts } from './mod-patches';
 
 type ActiveMod = 'vencord' | 'equicord';
 
@@ -103,6 +104,7 @@ async function injectMod() {
   const injectionStatus = {
     shelter: false,
     mod: null as ActiveMod | null,
+    restartHooks: 0,
     error: null as string | null
   };
   (window as any).kawaicordInjectionStatus = injectionStatus;
@@ -175,7 +177,15 @@ async function injectMod() {
       throw new Error(`${runtime.activeMod} is active but its JavaScript bundle is unavailable`);
     }
 
-    await webFrame.executeJavaScript(`${bundle.js}\n//# sourceURL=kawaicord-${runtime.activeMod}.js`);
+    const patchedBundle = routeClientModRestarts(bundle.js);
+    injectionStatus.restartHooks = patchedBundle.restartHooks;
+    if (patchedBundle.restartHooks === 0) {
+      console.warn(`${runtime.activeMod} exposed no page-reload restart calls to route.`);
+    } else {
+      console.log(`Routed ${patchedBundle.restartHooks} ${runtime.activeMod} restart calls through Kawaicord.`);
+    }
+
+    await webFrame.executeJavaScript(`${patchedBundle.source}\n//# sourceURL=kawaicord-${runtime.activeMod}.js`);
     if (bundle.css) await webFrame.insertCSS(bundle.css);
     injectionStatus.mod = runtime.activeMod;
     console.log(`${runtime.activeMod} injected`);

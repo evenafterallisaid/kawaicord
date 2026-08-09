@@ -1,11 +1,12 @@
 {
   "name": "kawaicord",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A polished Discord web client with Shelter and switchable Vencord or Equicord support",
   "main": "dist/main.js",
   "scripts": {
     "start": "npm run build && electron .",
     "build": "tsc",
+    "test": "npm run build && node --test tests/*.test.cjs",
     "dev": "npm run build && electron .",
     "watch": "tsc -w",
     "package": "npm run build && electron-builder --win nsis",

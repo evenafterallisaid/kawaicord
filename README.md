@@ -15,6 +15,7 @@ Kawaicord is a Windows desktop wrapper for Discord's web app with a custom title
 - Choose exactly one client mod: Vencord or Equicord.
 - The selected mod is refreshed automatically, with cached and installer-bundled fallbacks.
 - Mod changes are applied through a full, clean process restart.
+- Vencord and Equicord's own restart buttons are routed through the same clean process restart.
 - Recovery mode keeps Shelter available while pausing a repeatedly crashing client mod.
 - Background performance mode lowers rendering to 10 FPS without throttling notification timers.
 - Optional stronger background throttling is available for users who prefer battery savings.
@@ -33,7 +34,7 @@ Kawaicord downloads Shelter plus the selected Vencord/Equicord browser bundle wh
 3. Choose **Vencord** or **Equicord** under **Active Mod**.
 4. Select **Restart** in the banner.
 
-The old Electron process explicitly stops arRPC, flushes Discord storage, destroys the tray and window, and exits before Electron starts the replacement process. Only the selected client mod is injected after restart; Shelter is injected separately and remains enabled.
+The old Electron process explicitly stops arRPC, flushes Discord storage, destroys the tray and window, and exits before Electron starts the replacement process. This applies to Kawaicord's restart buttons and restart actions inside Vencord or Equicord. Only the selected client mod is injected after restart; Shelter is injected separately and remains enabled.
 
 ## Recovery and logs
 
@@ -86,7 +87,7 @@ icons/                App, installer, and tray artwork
 
 ```powershell
 npm ci
-npm run build
+npm test
 npm audit --omit=dev
 npm run package
 ```

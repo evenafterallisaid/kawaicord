@@ -694,12 +694,19 @@ ipcMain.handle('kawaicord:getRuntimeStatus', () => ({
 ipcMain.on('kawaicord:injectionStatus', (_event, status: {
   shelter?: boolean;
   mod?: string | null;
+  restartHooks?: number;
   error?: string | null;
 }) => {
   if (status.error) {
     appendLog('error', `Renderer injection failed: ${status.error}`);
   } else {
-    appendLog('info', `Renderer injection ready: Shelter + ${status.mod ?? 'recovery mode'}.`);
+    const restartDetail = status.mod
+      ? ` (${status.restartHooks ?? 0} restart calls routed)`
+      : '';
+    appendLog('info', `Renderer injection ready: Shelter + ${status.mod ?? 'recovery mode'}${restartDetail}.`);
+    if (status.mod && !status.restartHooks) {
+      appendLog('warn', `${status.mod} loaded without any restart-call hooks.`);
+    }
   }
 
   if (smokeTestMode) {
