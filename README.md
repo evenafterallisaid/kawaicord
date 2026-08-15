@@ -17,8 +17,12 @@ Kawaicord is a Windows desktop wrapper for Discord's web app with a custom title
 - Mod changes are applied through a full, clean process restart.
 - Vencord and Equicord's own restart buttons are routed through the same clean process restart.
 - Recovery mode keeps Shelter available while pausing a repeatedly crashing client mod.
+- The Windows title bar follows Discord's live theme tokens, including pure-black AMOLED themes, and keeps Discord navigation fully unobstructed.
 - Background performance mode lowers rendering to 10 FPS without throttling notification timers.
 - Optional stronger background throttling is available for users who prefer battery savings.
+- Window size, position, and maximized state are restored safely across monitor changes.
+- Discord science and Sentry telemetry requests are blocked without interfering with normal API traffic.
+- Hardware-accelerated rendering, video decode, and WebRTC encoding are enabled for smoother calls and screen sharing when supported.
 - arRPC, tray behavior, startup behavior, and mod updates are configurable inside Discord settings.
 
 ## Install
@@ -53,7 +57,7 @@ User settings, cached mod bundles, and Discord session data remain under `%APPDA
 Requirements:
 
 - Windows 10 or newer
-- Node.js 20 or newer
+- Node.js 22.12 or newer
 - npm
 
 ```powershell
@@ -61,6 +65,8 @@ npm ci
 npm run build
 npm start
 ```
+
+The install step downloads the matching Electron runtime automatically.
 
 Create the Windows installer:
 

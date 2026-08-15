@@ -1,5 +1,6 @@
 import { ipcRenderer, webFrame } from 'electron';
 import { routeClientModRestarts } from './mod-patches';
+import { cssRgbToHex, KAWAICORD_TITLEBAR_CSS } from './titlebar';
 
 type ActiveMod = 'vencord' | 'equicord';
 
@@ -828,115 +829,38 @@ function injectSettingsCss() {
 }
 
 function injectTitlebar() {
-  const titlebar = document.createElement('div');
+  if (document.getElementById('kawaicord-titlebar')) return;
+
+  const style = document.createElement('style');
+  style.id = 'kawaicord-titlebar-style';
+  style.textContent = KAWAICORD_TITLEBAR_CSS;
+  document.head.appendChild(style);
+
+  const titlebar = document.createElement('nav');
+  titlebar.id = 'kawaicord-titlebar';
+  titlebar.className = 'kawaicord-titlebar';
+  titlebar.setAttribute('aria-label', 'Kawaicord window controls');
   titlebar.innerHTML = `
-    <div class="kawaicord-titlebar">
-      <div class="kawaicord-title"><span class="kawaicord-title-mark">✦</span>Kawaicord</div>
-      <div class="kawaicord-controls">
-        <button type="button" aria-label="Minimize" class="kawaicord-control" id="kawaicord-minimize"><span class="icon icon-minimize"></span></button>
-        <button type="button" aria-label="Maximize" class="kawaicord-control" id="kawaicord-maximize"><span class="icon icon-maximize"></span></button>
-        <button type="button" aria-label="Close" class="kawaicord-control close" id="kawaicord-close"><span class="icon icon-close"></span></button>
-      </div>
+    <div class="kawaicord-title"><span class="kawaicord-title-mark" aria-hidden="true">✦</span>Kawaicord</div>
+    <div class="kawaicord-controls">
+      <button type="button" aria-label="Minimize" title="Minimize" class="kawaicord-control" id="kawaicord-minimize"><span class="kawaicord-control-icon kawaicord-icon-minimize"></span></button>
+      <button type="button" aria-label="Maximize" title="Maximize" class="kawaicord-control" id="kawaicord-maximize"><span class="kawaicord-control-icon kawaicord-icon-maximize"></span></button>
+      <button type="button" aria-label="Close" title="Close" class="kawaicord-control close" id="kawaicord-close"><span class="kawaicord-control-icon kawaicord-icon-close"></span></button>
     </div>
-    <style>
-      .kawaicord-titlebar {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        height: 28px;
-        background: color-mix(in srgb, var(--background-tertiary, #1e1f22) 92%, transparent);
-        border-bottom: 1px solid rgba(255,255,255,0.04);
-        -webkit-app-region: drag;
-        user-select: none;
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        z-index: 99999;
-        color: #b9bbbe;
-        font-family: var(--font-display);
-      }
-      .kawaicord-title {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding-left: 12px;
-        font-size: 12px;
-        font-weight: 600;
-        letter-spacing: 0.01em;
-      }
-      .kawaicord-title-mark {
-        color: #c084fc;
-        font-size: 13px;
-      }
-      .kawaicord-controls {
-        display: flex;
-        height: 100%;
-        -webkit-app-region: no-drag;
-      }
-      .kawaicord-control {
-        width: 42px;
-        height: 100%;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        cursor: pointer;
-        transition: background-color 0.1s;
-        color: inherit;
-        background: transparent;
-        border: 0;
-        padding: 0;
-      }
-      .kawaicord-control:hover {
-        background-color: rgba(255,255,255,0.1);
-      }
-      .kawaicord-control.close:hover {
-        background-color: #e81123;
-        color: white;
-      }
-      .icon {
-        width: 10px;
-        height: 10px;
-        position: relative;
-      }
-      .icon-minimize::before {
-        content: "";
-        position: absolute;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        height: 1px;
-        background-color: currentColor;
-      }
-      .icon-maximize {
-        border: 1px solid currentColor;
-        width: 8px;
-        height: 8px;
-      }
-      .icon-close::before,
-      .icon-close::after {
-        content: "";
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        width: 12px;
-        height: 1px;
-        background-color: currentColor;
-        transform: translate(-50%, -50%) rotate(45deg);
-      }
-      .icon-close::after {
-        transform: translate(-50%, -50%) rotate(-45deg);
-      }
-      #app-mount {
-        top: 28px !important;
-        height: calc(100vh - 28px) !important;
-        position: absolute !important;
-        width: 100% !important;
-      }
-    </style>
   `;
 
   document.body.prepend(titlebar);
+
+  const syncMaximizedState = async () => {
+    const maximized = await ipcRenderer.invoke('window:isMaximized') as boolean;
+    document.body.dataset.kawaicordMaximized = String(Boolean(maximized));
+    const button = document.getElementById('kawaicord-maximize');
+    if (button) {
+      const label = maximized ? 'Restore' : 'Maximize';
+      button.setAttribute('aria-label', label);
+      button.setAttribute('title', label);
+    }
+  };
 
   document.getElementById('kawaicord-minimize')?.addEventListener('click', () => {
     ipcRenderer.send('window:minimize');
@@ -944,35 +868,59 @@ function injectTitlebar() {
 
   document.getElementById('kawaicord-maximize')?.addEventListener('click', () => {
     ipcRenderer.send('window:maximize');
+    window.setTimeout(() => void syncMaximizedState(), 50);
   });
 
   document.getElementById('kawaicord-close')?.addEventListener('click', () => {
     ipcRenderer.send('window:close');
   });
+
+  titlebar.addEventListener('dblclick', event => {
+    if ((event.target as HTMLElement).closest('.kawaicord-controls')) return;
+    ipcRenderer.send('window:maximize');
+    window.setTimeout(() => void syncMaximizedState(), 50);
+  });
+
+  window.addEventListener('resize', () => void syncMaximizedState(), { passive: true });
+  void syncMaximizedState();
 }
 
 function initThemeObserver() {
-  const target = document.documentElement;
-  if (!target) {
-    return;
+  const root = document.documentElement;
+  const body = document.body;
+  if (!root || !body) return;
+
+  let updateTimer: number | null = null;
+  const updateTheme = async () => {
+    updateTimer = null;
+    const titlebar = document.getElementById('kawaicord-titlebar');
+    if (titlebar) {
+      const color = cssRgbToHex(getComputedStyle(titlebar).backgroundColor);
+      if (color) ipcRenderer.send('window:setBackgroundColor', color);
+    }
+
+    const config = await (window as any).kawaicord.getConfig();
+    if (config?.trayIconAuto) {
+      const classes = `${root.className} ${body.className}`;
+      const isLight = classes.includes('theme-light');
+      (window as any).kawaicord.setTrayIcon(isLight ? 'light' : 'dark');
+    }
+  };
+  const scheduleUpdate = () => {
+    if (updateTimer !== null) window.clearTimeout(updateTimer);
+    updateTimer = window.setTimeout(() => void updateTheme(), 50);
+  };
+  const themeObserver = new MutationObserver(scheduleUpdate);
+
+  for (const target of [root, body]) {
+    themeObserver.observe(target, {
+      attributes: true,
+      attributeFilter: ['class', 'style', 'data-theme']
+    });
   }
 
-  const themeObserver = new MutationObserver((mutations) => {
-    mutations.forEach(async (mutation) => {
-      if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
-        const config = await (window as any).kawaicord.getConfig();
-        if (config?.trayIconAuto) {
-          const isDark = target.classList.contains('theme-dark');
-          (window as any).kawaicord.setTrayIcon(isDark ? 'dark' : 'light');
-        }
-      }
-    });
-  });
-
-  themeObserver.observe(target, {
-    attributes: true,
-    attributeFilter: ['class']
-  });
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', scheduleUpdate);
+  scheduleUpdate();
 }
 
 window.addEventListener('DOMContentLoaded', () => {

@@ -8,6 +8,7 @@ import {
   nativeImage,
   net,
   protocol,
+  screen,
   session,
   shell,
   Tray,
@@ -17,10 +18,20 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { pathToFileURL } from 'url';
 import { getDetectables, addDetectable } from './detectables';
+import { restoreWindowState, StoredWindowState } from './window-state';
 
 // Fix for cache and network issues
 // app.commandLine.appendSwitch('disable-http-cache'); // Removed as it causes slow loading
 app.commandLine.appendSwitch('ignore-gpu-blocklist');
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+app.commandLine.appendSwitch('enable-accelerated-video-decode');
+app.commandLine.appendSwitch('webrtc-hw-encoding');
+app.commandLine.appendSwitch('webrtc-hw-decoding');
+app.commandLine.appendSwitch(
+  'enable-features',
+  'CanvasOopRasterization,WebRtcHWEncoding,WebRtcHWDecoding,AcceleratedVideoEncoder,AcceleratedVideoDecoder,ZeroCopyDesktopCapture'
+);
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -40,6 +51,7 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 let restartInProgress = false;
+let windowStateSaveTimer: NodeJS.Timeout | null = null;
 let sessionSafeMode = process.argv.includes('--safe-mode');
 const smokeTestMode = process.argv.includes('--smoke-test');
 const restartSmokeTestMode = process.argv.includes('--restart-smoke-test');
@@ -48,6 +60,7 @@ const vencordDataPath = path.join(app.getPath('userData'), 'vencord_data');
 const configPath = path.join(app.getPath('userData'), 'kawaicord_config.json');
 const recoveryPath = path.join(app.getPath('userData'), 'kawaicord_recovery.json');
 const logPath = path.join(app.getPath('userData'), 'kawaicord.log');
+const windowStatePath = path.join(app.getPath('userData'), 'kawaicord_window.json');
 const discordPartition = 'persist:discord';
 
 type ValidMod = 'vencord' | 'equicord';
@@ -111,12 +124,53 @@ function appendLog(level: string, message: string, error?: unknown) {
   }
 }
 
+function guardOutputPipes() {
+  for (const stream of [process.stdout, process.stderr]) {
+    stream?.on('error', error => {
+      if ((error as NodeJS.ErrnoException).code !== 'EPIPE') {
+        appendLog('warn', 'A process output stream failed.', error);
+      }
+    });
+  }
+}
+
 function updateRecoveryState(cleanExit: boolean) {
   try {
     fs.writeFileSync(recoveryPath, JSON.stringify({ cleanExit, updatedAt: Date.now() }, null, 2));
   } catch (error) {
     appendLog('warn', 'Could not update recovery state.', error);
   }
+}
+
+function readStoredWindowState(): StoredWindowState {
+  try {
+    return JSON.parse(fs.readFileSync(windowStatePath, 'utf-8')) as StoredWindowState;
+  } catch {
+    return {};
+  }
+}
+
+function saveWindowState() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  try {
+    const bounds = mainWindow.getNormalBounds();
+    const state: StoredWindowState = {
+      ...bounds,
+      maximized: mainWindow.isMaximized()
+    };
+    fs.writeFileSync(windowStatePath, JSON.stringify(state, null, 2), 'utf-8');
+  } catch (error) {
+    appendLog('warn', 'Could not save window state.', error);
+  }
+}
+
+function queueWindowStateSave() {
+  if (windowStateSaveTimer) clearTimeout(windowStateSaveTimer);
+  windowStateSaveTimer = setTimeout(() => {
+    windowStateSaveTimer = null;
+    saveWindowState();
+  }, 350);
 }
 
 function shouldStartInSafeMode() {
@@ -284,6 +338,15 @@ async function setupVencordInjection() {
   console.log('Setting up Discord header patches...');
   try {
     const ses = session.fromPartition(discordPartition);
+
+    ses.webRequest.onBeforeRequest({
+      urls: [
+        'https://discord.com/api/*/science*',
+        'https://*.discord.com/api/*/science*',
+        'https://sentry.io/*',
+        'https://*.sentry.io/*'
+      ]
+    }, (_details, callback) => callback({ cancel: true }));
 
     ses.webRequest.onHeadersReceived((details, callback) => {
       const headers = { ...details.responseHeaders };
@@ -498,9 +561,15 @@ function createTray() {
 function createWindow() {
   console.log('Creating window...');
   const appIconPath = path.join(__dirname, '..', 'icons', 'icon.png');
+  const restoredState = restoreWindowState(
+    readStoredWindowState(),
+    screen.getAllDisplays().map(display => display.workArea)
+  );
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 720,
+    width: restoredState.width,
+    height: restoredState.height,
+    x: restoredState.x,
+    y: restoredState.y,
     minWidth: 800,
     minHeight: 600,
     webPreferences: {
@@ -515,7 +584,7 @@ function createWindow() {
     },
     title: 'Kawaicord',
     icon: appIconPath,
-    backgroundColor: '#36393f',
+    backgroundColor: '#111214',
     show: false,
     frame: false, // Custom titlebar
     autoHideMenuBar: true
@@ -530,6 +599,8 @@ function createWindow() {
     if (!smokeTestMode) mainWindow?.show();
   });
 
+  if (restoredState.maximized) mainWindow.maximize();
+
   const updateBackgroundPerformance = () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     const isBackground = !mainWindow.isVisible() || mainWindow.isMinimized();
@@ -543,6 +614,10 @@ function createWindow() {
   mainWindow.on('restore', updateBackgroundPerformance);
   mainWindow.on('focus', updateBackgroundPerformance);
   mainWindow.on('blur', updateBackgroundPerformance);
+  mainWindow.on('move', queueWindowStateSave);
+  mainWindow.on('resize', queueWindowStateSave);
+  mainWindow.on('maximize', queueWindowStateSave);
+  mainWindow.on('unmaximize', queueWindowStateSave);
 
   mainWindow.webContents.on('did-navigate', (event, url) => {
     console.log('Navigated to:', url);
@@ -619,6 +694,7 @@ function createWindow() {
   });
 
   mainWindow.on('close', (e) => {
+    saveWindowState();
     if (config.minimizeToTray && !isQuitting) {
       e.preventDefault();
       mainWindow?.hide();
@@ -626,6 +702,10 @@ function createWindow() {
   });
 
   mainWindow.on('closed', () => {
+    if (windowStateSaveTimer) {
+      clearTimeout(windowStateSaveTimer);
+      windowStateSaveTimer = null;
+    }
     mainWindow = null;
   });
 
@@ -797,6 +877,11 @@ ipcMain.on('window:maximize', () => {
 });
 ipcMain.on('window:close', () => mainWindow?.close());
 ipcMain.handle('window:isMaximized', () => mainWindow?.isMaximized());
+ipcMain.on('window:setBackgroundColor', (_event, color) => {
+  if (typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color)) {
+    mainWindow?.setBackgroundColor(color);
+  }
+});
 
 // RPC Handlers
 ipcMain.on('kawaicord:rpc:refreshProcessList', () => {
@@ -816,7 +901,6 @@ ipcMain.on('kawaicord:rpc:getDetectables', (event) => {
 });
 
 
-app.commandLine.appendSwitch('enable-transparent-visuals');
 app.commandLine.appendSwitch('disable-gpu-process-crash-limit');
 
 crashReporter.start({
@@ -828,6 +912,7 @@ crashReporter.start({
 });
 
 sessionSafeMode = shouldStartInSafeMode();
+guardOutputPipes();
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
@@ -875,11 +960,20 @@ app.on('window-all-closed', () => {
 });
 
 process.on('uncaughtException', (error) => {
-  console.error('Uncaught exception:', error);
+  if ((error as NodeJS.ErrnoException).code === 'EPIPE') return;
+  try {
+    console.error('Uncaught exception:', error);
+  } catch {
+    // A detached GUI launch may no longer have a writable terminal pipe.
+  }
   appendLog('error', 'Uncaught main-process exception.', error);
 });
 
 process.on('unhandledRejection', (error) => {
-  console.error('Unhandled rejection:', error);
+  try {
+    console.error('Unhandled rejection:', error);
+  } catch {
+    // A detached GUI launch may no longer have a writable terminal pipe.
+  }
   appendLog('error', 'Unhandled main-process rejection.', error);
 });
