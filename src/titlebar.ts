@@ -1,16 +1,22 @@
 export const TITLEBAR_FALLBACK_HEIGHT = 32;
 export const TITLEBAR_CONTROLS_WIDTH = 138;
+export const TITLEBAR_CONTROLS_GAP = 8;
+export const TITLEBAR_RESERVED_WIDTH = TITLEBAR_CONTROLS_WIDTH + TITLEBAR_CONTROLS_GAP;
 
 export const KAWAICORD_TITLEBAR_CSS = `
-  :root {
-    --kawaicord-titlebar-height: max(${TITLEBAR_FALLBACK_HEIGHT}px, var(--custom-app-top-bar-height, 0px));
+  html:root {
+    /* Discord web resets this desktop-only token to 0px after login. Keep the
+     * native app bar alive so its arrows and toolbar are laid out on-screen. */
+    --custom-app-top-bar-height: ${TITLEBAR_FALLBACK_HEIGHT}px !important;
+    --kawaicord-titlebar-height: var(--custom-app-top-bar-height);
     --kawaicord-window-controls-width: ${TITLEBAR_CONTROLS_WIDTH}px;
+    --kawaicord-window-controls-reserved-width: ${TITLEBAR_RESERVED_WIDTH}px;
   }
 
   /* Discord already renders its own app bar. Keep it in place and reserve the
    * right edge for our frameless-window controls, matching Legcord's layout. */
   body[customTitlebar] div[class*="title"] + div[class*="trailing"] {
-    margin-right: var(--kawaicord-window-controls-width) !important;
+    margin-right: var(--kawaicord-window-controls-reserved-width) !important;
   }
 
   body[customTitlebar] div[class*="title"]:has(+ div[class*="trailing"]) {

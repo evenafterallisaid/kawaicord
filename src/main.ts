@@ -587,6 +587,8 @@ function createWindow() {
     backgroundColor: '#111214',
     show: false,
     frame: false, // Custom titlebar
+    titleBarStyle: 'hidden',
+    titleBarOverlay: false,
     autoHideMenuBar: true
   });
 

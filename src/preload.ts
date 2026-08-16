@@ -838,6 +838,7 @@ function injectTitlebar() {
 
   document.body.setAttribute('customTitlebar', '');
   document.body.setAttribute('kawaicord-platform', process.platform);
+  if (process.platform === 'win32') document.body.classList.add('platform-win');
 
   const controls = document.createElement('div');
   controls.id = 'kawaicord-window-controls';
