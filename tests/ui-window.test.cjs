@@ -4,11 +4,13 @@ const assert = require('node:assert/strict');
 const { cssRgbToHex, KAWAICORD_TITLEBAR_CSS } = require('../dist/titlebar.js');
 const { restoreWindowState } = require('../dist/window-state.js');
 
-test('titlebar uses Discord theme tokens and reserves a real app inset', () => {
+test('window controls share Discord native app bar without covering its UI', () => {
   assert.match(KAWAICORD_TITLEBAR_CSS, /background-color: var\(--background-base-lowest/);
   assert.match(KAWAICORD_TITLEBAR_CSS, /max\(32px, var\(--custom-app-top-bar-height, 0px\)\)/);
-  assert.match(KAWAICORD_TITLEBAR_CSS, /inset: var\(--kawaicord-titlebar-height\) 0 0/);
-  assert.doesNotMatch(KAWAICORD_TITLEBAR_CSS, /calc\(100vh/);
+  assert.match(KAWAICORD_TITLEBAR_CSS, /div\[class\*="title"\] \+ div\[class\*="trailing"\]/);
+  assert.match(KAWAICORD_TITLEBAR_CSS, /margin-right: var\(--kawaicord-window-controls-width\)/);
+  assert.doesNotMatch(KAWAICORD_TITLEBAR_CSS, /#app-mount/);
+  assert.doesNotMatch(KAWAICORD_TITLEBAR_CSS, /\.kawaicord-titlebar/);
 });
 
 test('computed Discord colors are normalized for Electron', () => {

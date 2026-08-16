@@ -1,54 +1,42 @@
 export const TITLEBAR_FALLBACK_HEIGHT = 32;
+export const TITLEBAR_CONTROLS_WIDTH = 138;
 
 export const KAWAICORD_TITLEBAR_CSS = `
   :root {
     --kawaicord-titlebar-height: max(${TITLEBAR_FALLBACK_HEIGHT}px, var(--custom-app-top-bar-height, 0px));
+    --kawaicord-window-controls-width: ${TITLEBAR_CONTROLS_WIDTH}px;
   }
 
-  .kawaicord-titlebar {
-    position: fixed;
-    inset: 0 0 auto 0;
-    z-index: 2147483646;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    height: var(--kawaicord-titlebar-height);
-    box-sizing: border-box;
-    overflow: hidden;
-    color: var(--interactive-icon-default, var(--interactive-normal, #b5bac1));
-    background-color: var(--background-base-lowest, var(--background-tertiary, #111214));
-    border-bottom: 1px solid var(--border-subtle, transparent);
-    font-family: var(--font-primary, "gg sans", "Segoe UI", sans-serif);
+  /* Discord already renders its own app bar. Keep it in place and reserve the
+   * right edge for our frameless-window controls, matching Legcord's layout. */
+  body[customTitlebar] div[class*="title"] + div[class*="trailing"] {
+    margin-right: var(--kawaicord-window-controls-width) !important;
+  }
+
+  body[customTitlebar] div[class*="title"]:has(+ div[class*="trailing"]) {
     -webkit-app-region: drag;
-    user-select: none;
   }
 
-  .kawaicord-title {
-    display: flex;
-    align-items: center;
-    min-width: 0;
-    height: 100%;
-    gap: 7px;
-    padding: 0 12px;
-    color: var(--header-secondary, var(--text-muted, #b5bac1));
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.01em;
-    white-space: nowrap;
-  }
-
-  .kawaicord-title-mark {
-    color: var(--brand-500, var(--brand-experiment, #5865f2));
-    font-size: 13px;
-    line-height: 1;
+  body[customTitlebar] div[class*="title"]:has(+ div[class*="trailing"]) button,
+  body[customTitlebar] div[class*="title"]:has(+ div[class*="trailing"]) a,
+  body[customTitlebar] div[class*="title"]:has(+ div[class*="trailing"]) input,
+  body[customTitlebar] div[class*="title"]:has(+ div[class*="trailing"]) [role="button"],
+  body[customTitlebar] div[class*="trailing"] {
+    -webkit-app-region: no-drag;
   }
 
   .kawaicord-controls {
+    position: fixed;
+    inset: 0 0 auto auto;
+    z-index: 2147483646;
     display: flex;
-    align-self: stretch;
-    flex: 0 0 auto;
+    width: var(--kawaicord-window-controls-width);
+    height: var(--kawaicord-titlebar-height);
+    color: var(--interactive-icon-default, var(--interactive-normal, #b5bac1));
+    background-color: var(--background-base-lowest, var(--background-tertiary, #111214));
+    font-family: var(--font-primary, "gg sans", "Segoe UI", sans-serif);
     -webkit-app-region: no-drag;
+    user-select: none;
   }
 
   .kawaicord-control {
@@ -139,18 +127,7 @@ export const KAWAICORD_TITLEBAR_CSS = `
     transform: translate(-50%, -50%) rotate(-45deg);
   }
 
-  #app-mount {
-    position: fixed !important;
-    inset: var(--kawaicord-titlebar-height) 0 0 !important;
-    width: auto !important;
-    height: auto !important;
-  }
-
   @media (forced-colors: active) {
-    .kawaicord-titlebar {
-      border-bottom-color: CanvasText;
-    }
-
     .kawaicord-control:hover {
       color: HighlightText;
       background-color: Highlight;

@@ -829,27 +829,28 @@ function injectSettingsCss() {
 }
 
 function injectTitlebar() {
-  if (document.getElementById('kawaicord-titlebar')) return;
+  if (document.getElementById('kawaicord-window-controls')) return;
 
   const style = document.createElement('style');
   style.id = 'kawaicord-titlebar-style';
   style.textContent = KAWAICORD_TITLEBAR_CSS;
   document.head.appendChild(style);
 
-  const titlebar = document.createElement('nav');
-  titlebar.id = 'kawaicord-titlebar';
-  titlebar.className = 'kawaicord-titlebar';
-  titlebar.setAttribute('aria-label', 'Kawaicord window controls');
-  titlebar.innerHTML = `
-    <div class="kawaicord-title"><span class="kawaicord-title-mark" aria-hidden="true">✦</span>Kawaicord</div>
-    <div class="kawaicord-controls">
-      <button type="button" aria-label="Minimize" title="Minimize" class="kawaicord-control" id="kawaicord-minimize"><span class="kawaicord-control-icon kawaicord-icon-minimize"></span></button>
-      <button type="button" aria-label="Maximize" title="Maximize" class="kawaicord-control" id="kawaicord-maximize"><span class="kawaicord-control-icon kawaicord-icon-maximize"></span></button>
-      <button type="button" aria-label="Close" title="Close" class="kawaicord-control close" id="kawaicord-close"><span class="kawaicord-control-icon kawaicord-icon-close"></span></button>
-    </div>
+  document.body.setAttribute('customTitlebar', '');
+  document.body.setAttribute('kawaicord-platform', process.platform);
+
+  const controls = document.createElement('div');
+  controls.id = 'kawaicord-window-controls';
+  controls.className = 'kawaicord-controls';
+  controls.setAttribute('role', 'group');
+  controls.setAttribute('aria-label', 'Window controls');
+  controls.innerHTML = `
+    <button type="button" aria-label="Minimize" title="Minimize" class="kawaicord-control" id="kawaicord-minimize"><span class="kawaicord-control-icon kawaicord-icon-minimize"></span></button>
+    <button type="button" aria-label="Maximize" title="Maximize" class="kawaicord-control" id="kawaicord-maximize"><span class="kawaicord-control-icon kawaicord-icon-maximize"></span></button>
+    <button type="button" aria-label="Close" title="Close" class="kawaicord-control close" id="kawaicord-close"><span class="kawaicord-control-icon kawaicord-icon-close"></span></button>
   `;
 
-  document.body.prepend(titlebar);
+  document.body.appendChild(controls);
 
   const syncMaximizedState = async () => {
     const maximized = await ipcRenderer.invoke('window:isMaximized') as boolean;
@@ -875,12 +876,6 @@ function injectTitlebar() {
     ipcRenderer.send('window:close');
   });
 
-  titlebar.addEventListener('dblclick', event => {
-    if ((event.target as HTMLElement).closest('.kawaicord-controls')) return;
-    ipcRenderer.send('window:maximize');
-    window.setTimeout(() => void syncMaximizedState(), 50);
-  });
-
   window.addEventListener('resize', () => void syncMaximizedState(), { passive: true });
   void syncMaximizedState();
 }
@@ -893,9 +888,9 @@ function initThemeObserver() {
   let updateTimer: number | null = null;
   const updateTheme = async () => {
     updateTimer = null;
-    const titlebar = document.getElementById('kawaicord-titlebar');
-    if (titlebar) {
-      const color = cssRgbToHex(getComputedStyle(titlebar).backgroundColor);
+    const controls = document.getElementById('kawaicord-window-controls');
+    if (controls) {
+      const color = cssRgbToHex(getComputedStyle(controls).backgroundColor);
       if (color) ipcRenderer.send('window:setBackgroundColor', color);
     }
 

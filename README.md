@@ -4,7 +4,7 @@
   <img src="icons/icon.png" alt="Kawaicord mascot" width="144">
 </p>
 
-Kawaicord is a Windows desktop wrapper for Discord's web app with a custom title bar, always-on Shelter support, and one-click switching between Vencord and Equicord.
+Kawaicord is a Windows desktop wrapper for Discord's web app with Discord-native window controls, always-on Shelter support, and one-click switching between Vencord and Equicord.
 
 > [!IMPORTANT]
 > Kawaicord is an independent, unofficial project. It is not affiliated with or endorsed by Discord Inc., Vencord, Equicord, or Shelter. Client modifications may violate Discord's Terms of Service; use them at your own risk.
@@ -17,7 +17,7 @@ Kawaicord is a Windows desktop wrapper for Discord's web app with a custom title
 - Mod changes are applied through a full, clean process restart.
 - Vencord and Equicord's own restart buttons are routed through the same clean process restart.
 - Recovery mode keeps Shelter available while pausing a repeatedly crashing client mod.
-- The Windows title bar follows Discord's live theme tokens, including pure-black AMOLED themes, and keeps Discord navigation fully unobstructed.
+- The Windows controls live inside Discord's own app bar, follow its live theme tokens (including pure-black AMOLED themes), and reserve their space without covering navigation or toolbar actions.
 - Background performance mode lowers rendering to 10 FPS without throttling notification timers.
 - Optional stronger background throttling is available for users who prefer battery savings.
 - Window size, position, and maximized state are restored safely across monitor changes.
