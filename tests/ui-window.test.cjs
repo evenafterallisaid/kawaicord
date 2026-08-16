@@ -6,6 +6,7 @@ const { restoreWindowState } = require('../dist/window-state.js');
 
 test('titlebar uses Discord theme tokens and reserves a real app inset', () => {
   assert.match(KAWAICORD_TITLEBAR_CSS, /background-color: var\(--background-base-lowest/);
+  assert.match(KAWAICORD_TITLEBAR_CSS, /max\(32px, var\(--custom-app-top-bar-height, 0px\)\)/);
   assert.match(KAWAICORD_TITLEBAR_CSS, /inset: var\(--kawaicord-titlebar-height\) 0 0/);
   assert.doesNotMatch(KAWAICORD_TITLEBAR_CSS, /calc\(100vh/);
 });

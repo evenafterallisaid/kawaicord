@@ -2,7 +2,7 @@ export const TITLEBAR_FALLBACK_HEIGHT = 32;
 
 export const KAWAICORD_TITLEBAR_CSS = `
   :root {
-    --kawaicord-titlebar-height: var(--custom-app-top-bar-height, ${TITLEBAR_FALLBACK_HEIGHT}px);
+    --kawaicord-titlebar-height: max(${TITLEBAR_FALLBACK_HEIGHT}px, var(--custom-app-top-bar-height, 0px));
   }
 
   .kawaicord-titlebar {
