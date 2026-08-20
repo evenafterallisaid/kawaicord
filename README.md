@@ -4,7 +4,7 @@
   <img src="icons/icon.png" alt="Kawaicord mascot" width="144">
 </p>
 
-Kawaicord is a Windows desktop wrapper for Discord's web app with a custom title bar, always-on Shelter support, and one-click switching between Vencord and Equicord.
+Kawaicord is a Windows desktop wrapper for Discord's web app with Discord-native window controls, always-on Shelter support, and one-click switching between Vencord and Equicord.
 
 > [!IMPORTANT]
 > Kawaicord is an independent, unofficial project. It is not affiliated with or endorsed by Discord Inc., Vencord, Equicord, or Shelter. Client modifications may violate Discord's Terms of Service; use them at your own risk.
@@ -15,9 +15,15 @@ Kawaicord is a Windows desktop wrapper for Discord's web app with a custom title
 - Choose exactly one client mod: Vencord or Equicord.
 - The selected mod is refreshed automatically, with cached and installer-bundled fallbacks.
 - Mod changes are applied through a full, clean process restart.
+- Vencord and Equicord's own restart buttons are routed through the same clean process restart.
 - Recovery mode keeps Shelter available while pausing a repeatedly crashing client mod.
+- The Windows controls live inside Discord's own platform-aware app bar, follow its live theme tokens (including pure-black AMOLED themes), and reserve their space plus a small safety gap without covering navigation or toolbar actions.
+- Window controls are isolated from third-party theme selectors, while a lightweight layout guard prevents themes from moving, hiding, or collapsing Discord's app bar and navigation controls.
 - Background performance mode lowers rendering to 10 FPS without throttling notification timers.
 - Optional stronger background throttling is available for users who prefer battery savings.
+- Window size, position, and maximized state are restored safely across monitor changes.
+- Discord science and Sentry telemetry requests are blocked without interfering with normal API traffic.
+- Hardware-accelerated rendering, video decode, and WebRTC encoding are enabled for smoother calls and screen sharing when supported.
 - arRPC, tray behavior, startup behavior, and mod updates are configurable inside Discord settings.
 
 ## Install
@@ -33,7 +39,7 @@ Kawaicord downloads Shelter plus the selected Vencord/Equicord browser bundle wh
 3. Choose **Vencord** or **Equicord** under **Active Mod**.
 4. Select **Restart** in the banner.
 
-The old Electron process explicitly stops arRPC, flushes Discord storage, destroys the tray and window, and exits before Electron starts the replacement process. Only the selected client mod is injected after restart; Shelter is injected separately and remains enabled.
+The old Electron process explicitly stops arRPC, flushes Discord storage, destroys the tray and window, and exits before Electron starts the replacement process. This applies to Kawaicord's restart buttons and restart actions inside Vencord or Equicord. Only the selected client mod is injected after restart; Shelter is injected separately and remains enabled.
 
 ## Recovery and logs
 
@@ -52,7 +58,7 @@ User settings, cached mod bundles, and Discord session data remain under `%APPDA
 Requirements:
 
 - Windows 10 or newer
-- Node.js 20 or newer
+- Node.js 22.12 or newer
 - npm
 
 ```powershell
@@ -60,6 +66,8 @@ npm ci
 npm run build
 npm start
 ```
+
+The install step downloads the matching Electron runtime automatically.
 
 Create the Windows installer:
 
@@ -86,7 +94,7 @@ icons/                App, installer, and tray artwork
 
 ```powershell
 npm ci
-npm run build
+npm test
 npm audit --omit=dev
 npm run package
 ```

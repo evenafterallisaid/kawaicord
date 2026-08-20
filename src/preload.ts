@@ -1,4 +1,13 @@
 import { ipcRenderer, webFrame } from 'electron';
+import { routeClientModRestarts } from './mod-patches';
+import {
+  cssRgbToHex,
+  KAWAICORD_TITLEBAR_CSS,
+  KAWAICORD_WINDOW_CONTROLS_CSS,
+  TITLEBAR_CONTROLS_WIDTH,
+  TITLEBAR_FALLBACK_HEIGHT,
+  TITLEBAR_RESERVED_WIDTH
+} from './titlebar';
 
 type ActiveMod = 'vencord' | 'equicord';
 
@@ -103,6 +112,7 @@ async function injectMod() {
   const injectionStatus = {
     shelter: false,
     mod: null as ActiveMod | null,
+    restartHooks: 0,
     error: null as string | null
   };
   (window as any).kawaicordInjectionStatus = injectionStatus;
@@ -175,7 +185,15 @@ async function injectMod() {
       throw new Error(`${runtime.activeMod} is active but its JavaScript bundle is unavailable`);
     }
 
-    await webFrame.executeJavaScript(`${bundle.js}\n//# sourceURL=kawaicord-${runtime.activeMod}.js`);
+    const patchedBundle = routeClientModRestarts(bundle.js);
+    injectionStatus.restartHooks = patchedBundle.restartHooks;
+    if (patchedBundle.restartHooks === 0) {
+      console.warn(`${runtime.activeMod} exposed no page-reload restart calls to route.`);
+    } else {
+      console.log(`Routed ${patchedBundle.restartHooks} ${runtime.activeMod} restart calls through Kawaicord.`);
+    }
+
+    await webFrame.executeJavaScript(`${patchedBundle.source}\n//# sourceURL=kawaicord-${runtime.activeMod}.js`);
     if (bundle.css) await webFrame.insertCSS(bundle.css);
     injectionStatus.mod = runtime.activeMod;
     console.log(`${runtime.activeMod} injected`);
@@ -817,152 +835,257 @@ function injectSettingsCss() {
   document.head.appendChild(style);
 }
 
+function setImportantStyle(element: HTMLElement, property: string, value: string) {
+  if (
+    element.style.getPropertyValue(property) !== value ||
+    element.style.getPropertyPriority(property) !== 'important'
+  ) {
+    element.style.setProperty(property, value, 'important');
+  }
+}
+
+function lockWindowControlHost(host: HTMLElement) {
+  const lockedStyles: Record<string, string> = {
+    position: 'fixed',
+    top: '0px',
+    right: '0px',
+    bottom: 'auto',
+    left: 'auto',
+    'z-index': '2147483646',
+    display: 'block',
+    width: `${TITLEBAR_CONTROLS_WIDTH}px`,
+    height: `${TITLEBAR_FALLBACK_HEIGHT}px`,
+    'min-width': `${TITLEBAR_CONTROLS_WIDTH}px`,
+    'max-width': `${TITLEBAR_CONTROLS_WIDTH}px`,
+    'min-height': `${TITLEBAR_FALLBACK_HEIGHT}px`,
+    'max-height': `${TITLEBAR_FALLBACK_HEIGHT}px`,
+    margin: '0px',
+    padding: '0px',
+    border: '0px',
+    transform: 'none',
+    translate: 'none',
+    scale: 'none',
+    rotate: 'none',
+    overflow: 'hidden',
+    isolation: 'isolate',
+    contain: 'layout style',
+    'box-sizing': 'border-box',
+    'pointer-events': 'auto',
+    visibility: 'visible',
+    opacity: '1',
+    color: 'var(--interactive-icon-default, var(--interactive-normal, #b5bac1))',
+    'background-color': 'var(--background-base-lowest, var(--background-tertiary, #111214))',
+    'font-family': 'var(--font-primary, "gg sans", "Segoe UI", sans-serif)',
+    '-webkit-app-region': 'no-drag'
+  };
+
+  for (const [property, value] of Object.entries(lockedStyles)) {
+    setImportantStyle(host, property, value);
+  }
+}
+
+function lockNativeAppBar() {
+  const root = document.documentElement;
+  const body = document.body;
+  if (!root || !body) return;
+
+  setImportantStyle(root, '--custom-app-top-bar-height', `${TITLEBAR_FALLBACK_HEIGHT}px`);
+  setImportantStyle(root, '--kawaicord-titlebar-height', `${TITLEBAR_FALLBACK_HEIGHT}px`);
+  setImportantStyle(root, '--kawaicord-window-controls-width', `${TITLEBAR_CONTROLS_WIDTH}px`);
+  setImportantStyle(root, '--kawaicord-window-controls-reserved-width', `${TITLEBAR_RESERVED_WIDTH}px`);
+
+  if (!body.hasAttribute('customTitlebar')) body.setAttribute('customTitlebar', '');
+  if (body.getAttribute('kawaicord-platform') !== process.platform) {
+    body.setAttribute('kawaicord-platform', process.platform);
+  }
+  if (process.platform === 'win32' && !body.classList.contains('platform-win')) {
+    body.classList.add('platform-win');
+  }
+
+  const host = document.getElementById('kawaicord-window-controls');
+  if (host) lockWindowControlHost(host);
+
+  const trailingCandidates = document.querySelectorAll<HTMLElement>(
+    'div[class*="title"] + div[class*="trailing"]'
+  );
+  const trailing = Array.from(trailingCandidates).find(candidate => {
+    const bar = candidate.parentElement;
+    if (!bar) return false;
+    const rect = bar.getBoundingClientRect();
+    return rect.top < TITLEBAR_FALLBACK_HEIGHT * 2;
+  });
+  const title = trailing?.previousElementSibling as HTMLElement | null;
+  const bar = trailing?.parentElement;
+  if (!trailing || !title || !bar) return;
+
+  const barStyles: Record<string, string> = {
+    height: `${TITLEBAR_FALLBACK_HEIGHT}px`,
+    'min-height': `${TITLEBAR_FALLBACK_HEIGHT}px`,
+    'max-height': `${TITLEBAR_FALLBACK_HEIGHT}px`,
+    margin: '0px',
+    transform: 'none',
+    translate: 'none',
+    scale: 'none',
+    rotate: 'none',
+    overflow: 'visible',
+    'box-sizing': 'border-box'
+  };
+  for (const [property, value] of Object.entries(barStyles)) {
+    setImportantStyle(bar, property, value);
+  }
+
+  for (const element of [title, trailing]) {
+    setImportantStyle(element, 'transform', 'none');
+    setImportantStyle(element, 'translate', 'none');
+    setImportantStyle(element, 'scale', 'none');
+    setImportantStyle(element, 'rotate', 'none');
+  }
+  setImportantStyle(trailing, 'margin-inline-end', `${TITLEBAR_RESERVED_WIDTH}px`);
+  setImportantStyle(trailing, 'margin-right', `${TITLEBAR_RESERVED_WIDTH}px`);
+
+  for (const interactive of Array.from(
+    bar.querySelectorAll<HTMLElement>('button, a, [role="button"]')
+  )) {
+    setImportantStyle(interactive, 'transform', 'none');
+    setImportantStyle(interactive, 'translate', 'none');
+    setImportantStyle(interactive, 'visibility', 'visible');
+  }
+}
+
 function injectTitlebar() {
-  const titlebar = document.createElement('div');
-  titlebar.innerHTML = `
-    <div class="kawaicord-titlebar">
-      <div class="kawaicord-title"><span class="kawaicord-title-mark">✦</span>Kawaicord</div>
-      <div class="kawaicord-controls">
-        <button type="button" aria-label="Minimize" class="kawaicord-control" id="kawaicord-minimize"><span class="icon icon-minimize"></span></button>
-        <button type="button" aria-label="Maximize" class="kawaicord-control" id="kawaicord-maximize"><span class="icon icon-maximize"></span></button>
-        <button type="button" aria-label="Close" class="kawaicord-control close" id="kawaicord-close"><span class="icon icon-close"></span></button>
-      </div>
-    </div>
-    <style>
-      .kawaicord-titlebar {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        height: 28px;
-        background: color-mix(in srgb, var(--background-tertiary, #1e1f22) 92%, transparent);
-        border-bottom: 1px solid rgba(255,255,255,0.04);
-        -webkit-app-region: drag;
-        user-select: none;
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        z-index: 99999;
-        color: #b9bbbe;
-        font-family: var(--font-display);
-      }
-      .kawaicord-title {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding-left: 12px;
-        font-size: 12px;
-        font-weight: 600;
-        letter-spacing: 0.01em;
-      }
-      .kawaicord-title-mark {
-        color: #c084fc;
-        font-size: 13px;
-      }
-      .kawaicord-controls {
-        display: flex;
-        height: 100%;
-        -webkit-app-region: no-drag;
-      }
-      .kawaicord-control {
-        width: 42px;
-        height: 100%;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        cursor: pointer;
-        transition: background-color 0.1s;
-        color: inherit;
-        background: transparent;
-        border: 0;
-        padding: 0;
-      }
-      .kawaicord-control:hover {
-        background-color: rgba(255,255,255,0.1);
-      }
-      .kawaicord-control.close:hover {
-        background-color: #e81123;
-        color: white;
-      }
-      .icon {
-        width: 10px;
-        height: 10px;
-        position: relative;
-      }
-      .icon-minimize::before {
-        content: "";
-        position: absolute;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        height: 1px;
-        background-color: currentColor;
-      }
-      .icon-maximize {
-        border: 1px solid currentColor;
-        width: 8px;
-        height: 8px;
-      }
-      .icon-close::before,
-      .icon-close::after {
-        content: "";
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        width: 12px;
-        height: 1px;
-        background-color: currentColor;
-        transform: translate(-50%, -50%) rotate(45deg);
-      }
-      .icon-close::after {
-        transform: translate(-50%, -50%) rotate(-45deg);
-      }
-      #app-mount {
-        top: 28px !important;
-        height: calc(100vh - 28px) !important;
-        position: absolute !important;
-        width: 100% !important;
-      }
-    </style>
+  if (document.getElementById('kawaicord-window-controls')) return;
+
+  const globalStyle = document.createElement('style');
+  globalStyle.id = 'kawaicord-titlebar-style';
+  globalStyle.textContent = KAWAICORD_TITLEBAR_CSS;
+  document.head.appendChild(globalStyle);
+
+  const host = document.createElement('div');
+  host.id = 'kawaicord-window-controls';
+  host.setAttribute('role', 'group');
+  host.setAttribute('aria-label', 'Window controls');
+  lockWindowControlHost(host);
+
+  const shadow = host.attachShadow({ mode: 'closed' });
+  const shadowStyle = document.createElement('style');
+  shadowStyle.textContent = KAWAICORD_WINDOW_CONTROLS_CSS;
+  const controls = document.createElement('div');
+  controls.className = 'controls';
+  controls.innerHTML = `
+    <button type="button" aria-label="Minimize" title="Minimize"><span class="icon minimize"></span></button>
+    <button type="button" aria-label="Maximize" title="Maximize"><span class="icon maximize"></span></button>
+    <button type="button" aria-label="Close" title="Close" class="close"><span class="icon close-icon"></span></button>
   `;
+  shadow.append(shadowStyle, controls);
+  document.body.appendChild(host);
 
-  document.body.prepend(titlebar);
+  const [minimizeButton, maximizeButton, closeButton] = Array.from(
+    controls.querySelectorAll<HTMLButtonElement>('button')
+  );
+  let maximizeSyncTimer: number | null = null;
+  const syncMaximizedState = async () => {
+    maximizeSyncTimer = null;
+    const maximized = await ipcRenderer.invoke('window:isMaximized') as boolean;
+    host.dataset.maximized = String(Boolean(maximized));
+    document.body.dataset.kawaicordMaximized = String(Boolean(maximized));
+    const label = maximized ? 'Restore' : 'Maximize';
+    maximizeButton.setAttribute('aria-label', label);
+    maximizeButton.setAttribute('title', label);
+  };
+  const scheduleMaximizedSync = () => {
+    if (maximizeSyncTimer !== null) window.clearTimeout(maximizeSyncTimer);
+    maximizeSyncTimer = window.setTimeout(() => void syncMaximizedState(), 80);
+  };
 
-  document.getElementById('kawaicord-minimize')?.addEventListener('click', () => {
-    ipcRenderer.send('window:minimize');
-  });
-
-  document.getElementById('kawaicord-maximize')?.addEventListener('click', () => {
+  minimizeButton.addEventListener('click', () => ipcRenderer.send('window:minimize'));
+  maximizeButton.addEventListener('click', () => {
     ipcRenderer.send('window:maximize');
+    scheduleMaximizedSync();
+  });
+  closeButton.addEventListener('click', () => ipcRenderer.send('window:close'));
+  window.addEventListener('resize', scheduleMaximizedSync, { passive: true });
+
+  let guardFrame: number | null = null;
+  const enforceLocks = () => {
+    guardFrame = null;
+    if (!globalStyle.isConnected) document.head.appendChild(globalStyle);
+    lockNativeAppBar();
+  };
+  const scheduleGuard = () => {
+    if (guardFrame === null) guardFrame = window.requestAnimationFrame(enforceLocks);
+  };
+
+  const layoutObserver = new MutationObserver(scheduleGuard);
+  layoutObserver.observe(document.head, { childList: true });
+  layoutObserver.observe(document.body, { childList: true, subtree: true });
+
+  const protectedAttributeObserver = new MutationObserver(scheduleGuard);
+  protectedAttributeObserver.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['class', 'style', 'data-theme']
+  });
+  protectedAttributeObserver.observe(document.body, {
+    attributes: true,
+    attributeFilter: ['class', 'style', 'customTitlebar', 'kawaicord-platform']
+  });
+  protectedAttributeObserver.observe(host, {
+    attributes: true,
+    attributeFilter: ['class', 'style', 'hidden']
   });
 
-  document.getElementById('kawaicord-close')?.addEventListener('click', () => {
-    ipcRenderer.send('window:close');
-  });
+  lockNativeAppBar();
+  void syncMaximizedState();
 }
 
 function initThemeObserver() {
-  const target = document.documentElement;
-  if (!target) {
-    return;
+  const root = document.documentElement;
+  const body = document.body;
+  if (!root || !body) return;
+
+  let updateTimer: number | null = null;
+  let lastBackgroundColor = '';
+  let lastTrayTheme = '';
+  let trayIconAuto = true;
+  void (window as any).kawaicord.getConfig().then((config: Partial<KawaicordConfig>) => {
+    trayIconAuto = config?.trayIconAuto !== false;
+  });
+
+  const updateTheme = () => {
+    updateTimer = null;
+    const controls = document.getElementById('kawaicord-window-controls');
+    if (controls) {
+      const color = cssRgbToHex(getComputedStyle(controls).backgroundColor);
+      if (color && color !== lastBackgroundColor) {
+        lastBackgroundColor = color;
+        ipcRenderer.send('window:setBackgroundColor', color);
+      }
+    }
+
+    if (trayIconAuto) {
+      const classes = `${root.className} ${body.className}`;
+      const isLight = classes.includes('theme-light');
+      const trayTheme = isLight ? 'light' : 'dark';
+      if (trayTheme !== lastTrayTheme) {
+        lastTrayTheme = trayTheme;
+        (window as any).kawaicord.setTrayIcon(trayTheme);
+      }
+    }
+  };
+  const scheduleUpdate = () => {
+    if (updateTimer !== null) window.clearTimeout(updateTimer);
+    updateTimer = window.setTimeout(updateTheme, 50);
+  };
+  const themeObserver = new MutationObserver(scheduleUpdate);
+
+  for (const target of [root, body]) {
+    themeObserver.observe(target, {
+      attributes: true,
+      attributeFilter: ['class', 'style', 'data-theme']
+    });
   }
 
-  const themeObserver = new MutationObserver((mutations) => {
-    mutations.forEach(async (mutation) => {
-      if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
-        const config = await (window as any).kawaicord.getConfig();
-        if (config?.trayIconAuto) {
-          const isDark = target.classList.contains('theme-dark');
-          (window as any).kawaicord.setTrayIcon(isDark ? 'dark' : 'light');
-        }
-      }
-    });
-  });
-
-  themeObserver.observe(target, {
-    attributes: true,
-    attributeFilter: ['class']
-  });
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', scheduleUpdate);
+  scheduleUpdate();
 }
 
 window.addEventListener('DOMContentLoaded', () => {
