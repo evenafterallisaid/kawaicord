@@ -52,6 +52,8 @@ let tray: Tray | null = null;
 let isQuitting = false;
 let restartInProgress = false;
 let windowStateSaveTimer: NodeJS.Timeout | null = null;
+let appliedFrameRate: number | null = null;
+let appliedBackgroundThrottling: boolean | null = null;
 let sessionSafeMode = process.argv.includes('--safe-mode');
 const smokeTestMode = process.argv.includes('--smoke-test');
 const restartSmokeTestMode = process.argv.includes('--restart-smoke-test');
@@ -62,6 +64,21 @@ const recoveryPath = path.join(app.getPath('userData'), 'kawaicord_recovery.json
 const logPath = path.join(app.getPath('userData'), 'kawaicord.log');
 const windowStatePath = path.join(app.getPath('userData'), 'kawaicord_window.json');
 const discordPartition = 'persist:discord';
+
+function updateWindowPerformance() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+
+  const isBackground = !mainWindow.isVisible() || mainWindow.isMinimized();
+  const frameRate = config.performanceMode && isBackground ? 10 : 60;
+  if (appliedFrameRate !== frameRate) {
+    mainWindow.webContents.setFrameRate(frameRate);
+    appliedFrameRate = frameRate;
+  }
+  if (appliedBackgroundThrottling !== config.backgroundThrottling) {
+    mainWindow.webContents.setBackgroundThrottling(config.backgroundThrottling);
+    appliedBackgroundThrottling = config.backgroundThrottling;
+  }
+}
 
 type ValidMod = 'vencord' | 'equicord';
 type KawaicordConfig = {
@@ -560,6 +577,8 @@ function createTray() {
 
 function createWindow() {
   console.log('Creating window...');
+  appliedFrameRate = null;
+  appliedBackgroundThrottling = null;
   const appIconPath = path.join(__dirname, '..', 'icons', 'icon.png');
   const restoredState = restoreWindowState(
     readStoredWindowState(),
@@ -603,19 +622,10 @@ function createWindow() {
 
   if (restoredState.maximized) mainWindow.maximize();
 
-  const updateBackgroundPerformance = () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    const isBackground = !mainWindow.isVisible() || mainWindow.isMinimized();
-    mainWindow.webContents.setFrameRate(config.performanceMode && isBackground ? 10 : 60);
-    mainWindow.webContents.setBackgroundThrottling(config.backgroundThrottling);
-  };
-
-  mainWindow.on('show', updateBackgroundPerformance);
-  mainWindow.on('hide', updateBackgroundPerformance);
-  mainWindow.on('minimize', updateBackgroundPerformance);
-  mainWindow.on('restore', updateBackgroundPerformance);
-  mainWindow.on('focus', updateBackgroundPerformance);
-  mainWindow.on('blur', updateBackgroundPerformance);
+  mainWindow.on('show', updateWindowPerformance);
+  mainWindow.on('hide', updateWindowPerformance);
+  mainWindow.on('minimize', updateWindowPerformance);
+  mainWindow.on('restore', updateWindowPerformance);
   mainWindow.on('move', queueWindowStateSave);
   mainWindow.on('resize', queueWindowStateSave);
   mainWindow.on('maximize', queueWindowStateSave);
@@ -711,7 +721,7 @@ function createWindow() {
     mainWindow = null;
   });
 
-  updateBackgroundPerformance();
+  updateWindowPerformance();
 }
 
 ipcMain.handle('kawaicord:getVersion', () => app.getVersion());
@@ -854,9 +864,7 @@ ipcMain.handle('kawaicord:setConfig', (_event, newConfig) => {
   }
 
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.setBackgroundThrottling(config.backgroundThrottling);
-    const isBackground = !mainWindow.isVisible() || mainWindow.isMinimized();
-    mainWindow.webContents.setFrameRate(config.performanceMode && isBackground ? 10 : 60);
+    updateWindowPerformance();
   }
 
   return true;

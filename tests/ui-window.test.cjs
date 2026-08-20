@@ -1,17 +1,35 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
-const { cssRgbToHex, KAWAICORD_TITLEBAR_CSS } = require('../dist/titlebar.js');
+const {
+  cssRgbToHex,
+  KAWAICORD_TITLEBAR_CSS,
+  KAWAICORD_WINDOW_CONTROLS_CSS
+} = require('../dist/titlebar.js');
 const { restoreWindowState } = require('../dist/window-state.js');
 
 test('window controls share Discord native app bar without covering its UI', () => {
-  assert.match(KAWAICORD_TITLEBAR_CSS, /background-color: var\(--background-base-lowest/);
+  assert.match(KAWAICORD_TITLEBAR_CSS, /html:root:root:root/);
   assert.match(KAWAICORD_TITLEBAR_CSS, /--custom-app-top-bar-height: 32px !important/);
   assert.match(KAWAICORD_TITLEBAR_CSS, /div\[class\*="title"\] \+ div\[class\*="trailing"\]/);
   assert.match(KAWAICORD_TITLEBAR_CSS, /--kawaicord-window-controls-reserved-width: 146px/);
   assert.match(KAWAICORD_TITLEBAR_CSS, /margin-right: var\(--kawaicord-window-controls-reserved-width\)/);
   assert.doesNotMatch(KAWAICORD_TITLEBAR_CSS, /#app-mount/);
   assert.doesNotMatch(KAWAICORD_TITLEBAR_CSS, /\.kawaicord-titlebar/);
+  assert.match(KAWAICORD_WINDOW_CONTROLS_CSS, /:host/);
+  assert.match(KAWAICORD_WINDOW_CONTROLS_CSS, /all: unset/);
+  assert.match(KAWAICORD_WINDOW_CONTROLS_CSS, /background-color: var\(--background-base-lowest/);
+});
+
+test('third-party themes cannot restyle or collapse protected window chrome', () => {
+  const preload = fs.readFileSync(path.join(__dirname, '..', 'dist', 'preload.js'), 'utf8');
+  assert.match(preload, /attachShadow\(\{ mode: 'closed' \}\)/);
+  assert.match(preload, /setImportantStyle\(root, '--custom-app-top-bar-height'/);
+  assert.match(preload, /setImportantStyle\(trailing, 'margin-right'/);
+  assert.match(preload, /lockWindowControlHost\(host\)/);
+  assert.doesNotMatch(KAWAICORD_WINDOW_CONTROLS_CSS, /\.theme-/);
 });
 
 test('computed Discord colors are normalized for Electron', () => {

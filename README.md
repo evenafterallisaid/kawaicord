@@ -18,6 +18,7 @@ Kawaicord is a Windows desktop wrapper for Discord's web app with Discord-native
 - Vencord and Equicord's own restart buttons are routed through the same clean process restart.
 - Recovery mode keeps Shelter available while pausing a repeatedly crashing client mod.
 - The Windows controls live inside Discord's own platform-aware app bar, follow its live theme tokens (including pure-black AMOLED themes), and reserve their space plus a small safety gap without covering navigation or toolbar actions.
+- Window controls are isolated from third-party theme selectors, while a lightweight layout guard prevents themes from moving, hiding, or collapsing Discord's app bar and navigation controls.
 - Background performance mode lowers rendering to 10 FPS without throttling notification timers.
 - Optional stronger background throttling is available for users who prefer battery savings.
 - Window size, position, and maximized state are restored safely across monitor changes.

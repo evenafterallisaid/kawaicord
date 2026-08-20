@@ -3,41 +3,39 @@ export const TITLEBAR_CONTROLS_WIDTH = 138;
 export const TITLEBAR_CONTROLS_GAP = 8;
 export const TITLEBAR_RESERVED_WIDTH = TITLEBAR_CONTROLS_WIDTH + TITLEBAR_CONTROLS_GAP;
 
+// These rules only protect the part of Discord that shares space with the
+// frameless window controls. Runtime inline locks provide the final authority;
+// the stylesheet keeps the layout correct before Discord's app bar mounts.
 export const KAWAICORD_TITLEBAR_CSS = `
-  html:root {
-    /* Discord web resets this desktop-only token to 0px after login. Keep the
-     * native app bar alive so its arrows and toolbar are laid out on-screen. */
+  html:root:root:root {
     --custom-app-top-bar-height: ${TITLEBAR_FALLBACK_HEIGHT}px !important;
-    --kawaicord-titlebar-height: var(--custom-app-top-bar-height);
-    --kawaicord-window-controls-width: ${TITLEBAR_CONTROLS_WIDTH}px;
-    --kawaicord-window-controls-reserved-width: ${TITLEBAR_RESERVED_WIDTH}px;
+    --kawaicord-titlebar-height: ${TITLEBAR_FALLBACK_HEIGHT}px !important;
+    --kawaicord-window-controls-width: ${TITLEBAR_CONTROLS_WIDTH}px !important;
+    --kawaicord-window-controls-reserved-width: ${TITLEBAR_RESERVED_WIDTH}px !important;
   }
 
-  /* Discord already renders its own app bar. Keep it in place and reserve the
-   * right edge for our frameless-window controls, matching Legcord's layout. */
-  body[customTitlebar] div[class*="title"] + div[class*="trailing"] {
+  html:root body[customTitlebar][kawaicord-platform] div[class*="title"] + div[class*="trailing"] {
+    margin-inline-end: var(--kawaicord-window-controls-reserved-width) !important;
     margin-right: var(--kawaicord-window-controls-reserved-width) !important;
   }
 
-  body[customTitlebar] div[class*="title"]:has(+ div[class*="trailing"]) {
-    -webkit-app-region: drag;
+  html:root body[customTitlebar][kawaicord-platform] div[class*="title"]:has(+ div[class*="trailing"]) {
+    -webkit-app-region: drag !important;
   }
 
-  body[customTitlebar] div[class*="title"]:has(+ div[class*="trailing"]) button,
-  body[customTitlebar] div[class*="title"]:has(+ div[class*="trailing"]) a,
-  body[customTitlebar] div[class*="title"]:has(+ div[class*="trailing"]) input,
-  body[customTitlebar] div[class*="title"]:has(+ div[class*="trailing"]) [role="button"],
-  body[customTitlebar] div[class*="trailing"] {
-    -webkit-app-region: no-drag;
+  html:root body[customTitlebar][kawaicord-platform] div[class*="title"]:has(+ div[class*="trailing"]) button,
+  html:root body[customTitlebar][kawaicord-platform] div[class*="title"]:has(+ div[class*="trailing"]) a,
+  html:root body[customTitlebar][kawaicord-platform] div[class*="title"]:has(+ div[class*="trailing"]) input,
+  html:root body[customTitlebar][kawaicord-platform] div[class*="title"]:has(+ div[class*="trailing"]) [role="button"],
+  html:root body[customTitlebar][kawaicord-platform] div[class*="trailing"] {
+    -webkit-app-region: no-drag !important;
   }
+`;
 
-  .kawaicord-controls {
-    position: fixed;
-    inset: 0 0 auto auto;
-    z-index: 2147483646;
-    display: flex;
-    width: var(--kawaicord-window-controls-width);
-    height: var(--kawaicord-titlebar-height);
+// The actual controls live in a shadow root. Theme variables still inherit,
+// while selectors and global resets from third-party themes cannot enter it.
+export const KAWAICORD_WINDOW_CONTROLS_CSS = `
+  :host {
     color: var(--interactive-icon-default, var(--interactive-normal, #b5bac1));
     background-color: var(--background-base-lowest, var(--background-tertiary, #111214));
     font-family: var(--font-primary, "gg sans", "Segoe UI", sans-serif);
@@ -45,43 +43,55 @@ export const KAWAICORD_TITLEBAR_CSS = `
     user-select: none;
   }
 
-  .kawaicord-control {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  .controls {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    color: inherit;
+    background: inherit;
+  }
+
+  button {
+    all: unset;
     position: relative;
     display: grid;
     width: 46px;
     height: 100%;
+    flex: 0 0 46px;
     place-items: center;
-    padding: 0;
     color: inherit;
     background: transparent;
-    border: 0;
     cursor: default;
     transition: color 100ms ease, background-color 100ms ease;
   }
 
-  .kawaicord-control:hover {
+  button:hover {
     color: var(--interactive-text-hover, var(--header-primary, #f2f3f5));
     background-color: var(--interactive-background-hover, rgba(255, 255, 255, 0.08));
   }
 
-  .kawaicord-control:focus-visible {
+  button:focus-visible {
     outline: 2px solid var(--focus-primary, var(--brand-500, #5865f2));
     outline-offset: -2px;
   }
 
-  .kawaicord-control.close:hover {
+  button.close:hover {
     color: #fff;
     background-color: #e81123;
   }
 
-  .kawaicord-control-icon {
+  .icon {
     position: relative;
     width: 10px;
     height: 10px;
     pointer-events: none;
   }
 
-  .kawaicord-icon-minimize::before {
+  .minimize::before {
     position: absolute;
     inset: auto 0 1px;
     height: 1px;
@@ -89,15 +99,15 @@ export const KAWAICORD_TITLEBAR_CSS = `
     content: "";
   }
 
-  .kawaicord-icon-maximize::before {
+  .maximize::before {
     position: absolute;
     inset: 0;
     border: 1px solid currentColor;
     content: "";
   }
 
-  body[data-kawaicord-maximized="true"] .kawaicord-icon-maximize::before,
-  body[data-kawaicord-maximized="true"] .kawaicord-icon-maximize::after {
+  :host([data-maximized="true"]) .maximize::before,
+  :host([data-maximized="true"]) .maximize::after {
     position: absolute;
     width: 7px;
     height: 7px;
@@ -105,17 +115,17 @@ export const KAWAICORD_TITLEBAR_CSS = `
     content: "";
   }
 
-  body[data-kawaicord-maximized="true"] .kawaicord-icon-maximize::before {
+  :host([data-maximized="true"]) .maximize::before {
     inset: 2px auto auto 0;
   }
 
-  body[data-kawaicord-maximized="true"] .kawaicord-icon-maximize::after {
+  :host([data-maximized="true"]) .maximize::after {
     inset: 0 0 auto auto;
     background-color: var(--background-base-lowest, var(--background-tertiary, #111214));
   }
 
-  .kawaicord-icon-close::before,
-  .kawaicord-icon-close::after {
+  .close-icon::before,
+  .close-icon::after {
     position: absolute;
     top: 50%;
     left: 50%;
@@ -125,16 +135,16 @@ export const KAWAICORD_TITLEBAR_CSS = `
     content: "";
   }
 
-  .kawaicord-icon-close::before {
+  .close-icon::before {
     transform: translate(-50%, -50%) rotate(45deg);
   }
 
-  .kawaicord-icon-close::after {
+  .close-icon::after {
     transform: translate(-50%, -50%) rotate(-45deg);
   }
 
   @media (forced-colors: active) {
-    .kawaicord-control:hover {
+    button:hover {
       color: HighlightText;
       background-color: Highlight;
     }
