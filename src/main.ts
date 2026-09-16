@@ -42,7 +42,7 @@ protocol.registerSchemesAsPrivileged([
       standard: true,
       secure: true,
       supportFetchAPI: true,
-      corsEnabled: false,
+      corsEnabled: true,
       bypassCSP: true,
       stream: true
     }
@@ -883,7 +883,7 @@ function getTrayIconPath(theme: string) {
 }
 
 function setupKawaicordProtocol() {
-  protocol.handle('kawaicord', async (request) => {
+  session.fromPartition(discordPartition).protocol.handle('kawaicord', async (request) => {
     try {
       const url = new URL(request.url);
 
@@ -908,7 +908,9 @@ function setupKawaicordProtocol() {
           return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
         }
 
-        return net.fetch(pathToFileURL(filePath).toString());
+        const response = await net.fetch(pathToFileURL(filePath).toString());
+        response.headers.set('Access-Control-Allow-Origin', 'https://discord.com');
+        return response;
       }
 
       return new Response('bad', { status: 400, headers: { 'content-type': 'text/plain' } });
@@ -1232,6 +1234,33 @@ ipcMain.on('kawaicord:toggleTray', (event, enabled) => {
 ipcMain.on('kawaicord:getOsRelease', (event) => event.returnValue = require('os').release());
 ipcMain.on('kawaicord:getOsArch', (event) => event.returnValue = require('os').arch());
 ipcMain.handle('vencord:getDataPath', () => vencordDataPath);
+
+// Startup is an ordering boundary: browser mods must hook Discord before its
+// first scripts run (Discord removes localStorage and initializes webpack).
+// Keep this local-only; network updates must never enter this synchronous path.
+ipcMain.on('kawaicord:getStartupBundles', (event) => {
+  try {
+    const read = (name: string, extension: string) => {
+      for (const candidate of [
+        path.join(app.getPath('userData'), `${name}.${extension}`),
+        path.join(__dirname, '..', name, `${name}.${extension}`)
+      ]) {
+        try { return fs.readFileSync(candidate, 'utf8'); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+      }
+      return '';
+    };
+    event.returnValue = {
+      activeMod: config.activeMod,
+      safeMode: sessionSafeMode,
+      shelter: { js: read('shelter', 'js') },
+      mod: { enabled: !sessionSafeMode, js: sessionSafeMode ? '' : read(config.activeMod, 'js'),
+        css: sessionSafeMode ? '' : read(config.activeMod, 'css') }
+    };
+  } catch (error) {
+    event.returnValue = { error: String(error) };
+  }
+});
 
 ipcMain.handle('kawaicord:getShelterBundle', async () => {
   const userDataJsPath = path.join(app.getPath('userData'), 'shelter.js');

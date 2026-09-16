@@ -152,6 +152,9 @@ const injectionStatus: InjectionStatus = {
 let injectionPromise: Promise<boolean> | null = null;
 let injectionComplete = false;
 let injectionRetryTimer: number | null = null;
+// Acquire local bundles before yielding to Discord's scripts. Async IPC here
+// races webpack startup and Discord's removal of window.localStorage.
+let startupBundles = ipcRenderer.sendSync('kawaicord:getStartupBundles');
 
 async function injectModOnce(reason: string): Promise<boolean> {
   injectionStatus.attempts += 1;
@@ -161,7 +164,8 @@ async function injectModOnce(reason: string): Promise<boolean> {
 
   if (!injectionStatus.shelter) {
     try {
-      const shelterBundle = await ipcRenderer.invoke('kawaicord:getShelterBundle') as { js?: string };
+      if (startupBundles?.error) throw new Error(startupBundles.error);
+      const shelterBundle = startupBundles.shelter as { js?: string };
       if (shelterBundle?.js) {
         await webFrame.executeJavaScript(`(()=>{
   if (window.__kawaicordShelterInjected === true) return;
@@ -209,7 +213,7 @@ async function injectModOnce(reason: string): Promise<boolean> {
   }
 
   try {
-    const runtime = await ipcRenderer.invoke('kawaicord:getRuntimeStatus') as {
+    const runtime = startupBundles as {
       activeMod: ActiveMod;
       safeMode: boolean;
     };
@@ -221,10 +225,7 @@ async function injectModOnce(reason: string): Promise<boolean> {
 
     if (injectionStatus.mod === runtime.activeMod) return injectionStatus.shelter;
 
-    const channel = runtime.activeMod === 'equicord'
-      ? 'kawaicord:getEquicordBundle'
-      : 'kawaicord:getVencordBundle';
-    const bundle = await ipcRenderer.invoke(channel) as {
+    const bundle = startupBundles.mod as {
       enabled?: boolean;
       mod?: ActiveMod;
       js?: string;
@@ -259,6 +260,7 @@ async function injectModOnce(reason: string): Promise<boolean> {
     }
     if (bundle.css) await webFrame.insertCSS(bundle.css);
     injectionStatus.mod = runtime.activeMod;
+    if (injectionStatus.shelter) startupBundles = null; // Release source after startup.
     console.log(`${runtime.activeMod} injected`);
   } catch (error) {
     console.error('Failed to inject mod:', error);

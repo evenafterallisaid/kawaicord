@@ -20,7 +20,8 @@ test('installed builds update from the Kawaicord GitHub Releases feed', () => {
   assert.match(main, /autoUpdater\.autoDownload = true/);
   assert.match(main, /autoUpdater\.autoInstallOnAppQuit = true/);
   assert.match(main, /Update request rejected from an untrusted renderer/);
-  assert.match(releaseWorkflow, /electron-builder --win nsis --publish always|npm run release/);
+  assert.match(releaseWorkflow, /gh release upload/);
+  assert.match(releaseWorkflow, /build\/latest.yml/);
   assert.match(releaseWorkflow, /GH_TOKEN/);
 });
 
