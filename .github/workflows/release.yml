@@ -37,7 +37,25 @@ jobs:
             throw "Tag ${{ github.ref_name }} does not match package version $packageVersion"
           }
 
-      - name: Build and publish release
-        run: npm run release
+      - name: Test and build installer
+        shell: pwsh
+        run: |
+          npm test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run package
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Publish installer and matching update metadata
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = node -p "require('./package.json').version"
+          gh release view $tag --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --verify-tag --generate-notes --repo "${{ github.repository }}"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          gh release upload $tag "build/Kawaicord-Setup-$version-x64.exe" "build/Kawaicord-Setup-$version-x64.exe.blockmap" "build/latest.yml" --clobber --repo "${{ github.repository }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
