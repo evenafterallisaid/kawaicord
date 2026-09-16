@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Kawaicord tray icon for light taskbars">
+  <g transform="translate(-19.2 -19.2) scale(1.15)">
+    <path d="M49 82 80 51l16 26a94 94 0 0 1 64 0l16-26 31 31a93 93 0 0 1 16 52c0 52-42 91-95 91s-95-39-95-91a93 93 0 0 1 16-52Z" fill="#321b48"/>
+    <circle cx="94" cy="139" r="10" fill="#fff"/>
+    <circle cx="162" cy="139" r="10" fill="#fff"/>
+    <path d="M112 171c0-9 8-14 16-8 8-6 16-1 16 8 0 11-16 21-16 21s-16-10-16-21Z" fill="#ec4899"/>
+  </g>
+</svg>

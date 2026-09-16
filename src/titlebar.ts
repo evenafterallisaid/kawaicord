@@ -20,7 +20,18 @@ export const KAWAICORD_TITLEBAR_CSS = `
   }
 
   html:root body[customTitlebar][kawaicord-platform] div[class*="title"]:has(+ div[class*="trailing"]) {
+    app-region: drag !important;
     -webkit-app-region: drag !important;
+  }
+
+  html:root body[customTitlebar][kawaicord-platform] div[class*="title"]:has(+ div[class*="trailing"])::before {
+    content: "";
+    position: fixed;
+    inset: 0 146px auto 80px;
+    height: ${TITLEBAR_FALLBACK_HEIGHT}px;
+    app-region: drag !important;
+    -webkit-app-region: drag !important;
+    pointer-events: none;
   }
 
   html:root body[customTitlebar][kawaicord-platform] div[class*="title"]:has(+ div[class*="trailing"]) button,
@@ -28,6 +39,7 @@ export const KAWAICORD_TITLEBAR_CSS = `
   html:root body[customTitlebar][kawaicord-platform] div[class*="title"]:has(+ div[class*="trailing"]) input,
   html:root body[customTitlebar][kawaicord-platform] div[class*="title"]:has(+ div[class*="trailing"]) [role="button"],
   html:root body[customTitlebar][kawaicord-platform] div[class*="trailing"] {
+    app-region: no-drag !important;
     -webkit-app-region: no-drag !important;
   }
 `;
@@ -55,6 +67,30 @@ export const KAWAICORD_WINDOW_CONTROLS_CSS = `
     background: inherit;
   }
 
+  .navigation {
+    display: flex;
+    width: 80px;
+    height: 100%;
+    align-items: center;
+    padding-left: 4px;
+    color: inherit;
+    background: inherit;
+  }
+
+  .navigation button {
+    width: 36px;
+    flex: 0 0 36px;
+  }
+
+  .navigation button:disabled {
+    color: var(--interactive-muted, #5c6068);
+    pointer-events: none;
+  }
+
+  :host([data-focused="false"]) .controls {
+    color: var(--interactive-muted, var(--interactive-normal, #80848e));
+  }
+
   button {
     all: unset;
     position: relative;
@@ -66,7 +102,7 @@ export const KAWAICORD_WINDOW_CONTROLS_CSS = `
     color: inherit;
     background: transparent;
     cursor: default;
-    transition: color 100ms ease, background-color 100ms ease;
+    transition: color 80ms linear, background-color 80ms linear;
   }
 
   button:hover {
@@ -84,63 +120,54 @@ export const KAWAICORD_WINDOW_CONTROLS_CSS = `
     background-color: #e81123;
   }
 
+  button:not(.close):active {
+    color: var(--interactive-text-active, var(--header-primary, #f2f3f5));
+    background-color: var(--interactive-background-selected, rgba(255, 255, 255, 0.12));
+  }
+
+  button.close:active {
+    color: rgba(0, 0, 0, 0.8);
+    background-color: #f1707a;
+  }
+
   .icon {
-    position: relative;
-    width: 10px;
-    height: 10px;
+    width: 11px;
+    height: 11px;
+    background-color: currentColor;
+    -webkit-mask-position: center;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-size: 11px 11px;
     pointer-events: none;
   }
 
-  .minimize::before {
-    position: absolute;
-    inset: auto 0 1px;
-    height: 1px;
-    background: currentColor;
-    content: "";
+  .minimize {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 11 11'%3E%3Cpath d='M0 5h11v1H0z'/%3E%3C/svg%3E");
   }
 
-  .maximize::before {
-    position: absolute;
-    inset: 0;
-    border: 1px solid currentColor;
-    content: "";
+  .maximize {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 11 11'%3E%3Cpath fill-rule='evenodd' d='M0 0h11v11H0V0zm1 1v9h9V1H1z'/%3E%3C/svg%3E");
   }
 
-  :host([data-maximized="true"]) .maximize::before,
-  :host([data-maximized="true"]) .maximize::after {
-    position: absolute;
-    width: 7px;
-    height: 7px;
-    border: 1px solid currentColor;
-    content: "";
+  :host([data-maximized="true"]) .maximize {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 11 11'%3E%3Cpath fill-rule='evenodd' d='M3 0h8v8H9V3H3V0zm1 1v1h6v5H9V1H4zM0 3h8v8H0V3zm1 1v6h6V4H1z'/%3E%3C/svg%3E");
   }
 
-  :host([data-maximized="true"]) .maximize::before {
-    inset: 2px auto auto 0;
+  .close-icon {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 11 11'%3E%3Cpath d='M.78 0 5.5 4.72 10.22 0l.78.78L6.28 5.5 11 10.22l-.78.78L5.5 6.28.78 11 0 10.22 4.72 5.5 0 .78.78 0z'/%3E%3C/svg%3E");
   }
 
-  :host([data-maximized="true"]) .maximize::after {
-    inset: 0 0 auto auto;
-    background-color: var(--background-base-lowest, var(--background-tertiary, #111214));
+  .back-icon {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 11 11'%3E%3Cpath d='M4.32.78 0 5.1l4.32 4.32.78-.78L2.11 5.65H11v-1.1H2.11L5.1 1.56 4.32.78z'/%3E%3C/svg%3E");
   }
 
-  .close-icon::before,
-  .close-icon::after {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 12px;
-    height: 1px;
-    background: currentColor;
-    content: "";
+  .forward-icon {
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 11 11'%3E%3Cpath d='m6.68.78 4.32 4.32-4.32 4.32-.78-.78 2.99-2.99H0v-1.1h8.89L5.9 1.56l.78-.78z'/%3E%3C/svg%3E");
   }
 
-  .close-icon::before {
-    transform: translate(-50%, -50%) rotate(45deg);
-  }
-
-  .close-icon::after {
-    transform: translate(-50%, -50%) rotate(-45deg);
+  @media (prefers-reduced-motion: reduce) {
+    button {
+      transition: none;
+    }
   }
 
   @media (forced-colors: active) {

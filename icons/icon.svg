@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Kawaicord cat logo">
+  <defs>
+    <linearGradient id="cat" x1="284" y1="200" x2="756" y2="824" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8b5cf6"/>
+      <stop offset=".55" stop-color="#b56df0"/>
+      <stop offset="1" stop-color="#ec4899"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(-128 -128) scale(1.25)">
+    <path
+      d="M246 327 365 208l59 99a350 350 0 0 1 176 0l59-99 119 119a322 322 0 0 1 56 181c0 182-144 316-322 316S190 690 190 508a322 322 0 0 1 56-181Z"
+      fill="url(#cat)"
+      stroke="#3f1b63"
+      stroke-width="12"
+      stroke-linejoin="round"
+    />
+    <circle cx="393" cy="525" r="38" fill="#fff"/>
+    <circle cx="631" cy="525" r="38" fill="#fff"/>
+    <path d="M456 641c0-31 28-50 56-29 28-21 56-2 56 29 0 39-56 72-56 72s-56-33-56-72Z" fill="#ffd4e6"/>
+    <path d="M748 290c12 37 25 50 62 62-37 12-50 25-62 62-12-37-25-50-62-62 37-12 50-25 62-62Z" fill="#fff2a8"/>
+  </g>
+</svg>

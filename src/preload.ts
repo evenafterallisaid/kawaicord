@@ -1,4 +1,5 @@
 import { ipcRenderer, webFrame } from 'electron';
+import { shouldReleaseImageCache } from './performance';
 import { routeClientModRestarts } from './mod-patches';
 import {
   cssRgbToHex,
@@ -22,6 +23,18 @@ type KawaicordConfig = {
   startAtLogin: boolean;
   minimizeToTray: boolean;
   autoUpdateMods: boolean;
+  autoUpdateApp: boolean;
+};
+
+type AppUpdateStatus = {
+  phase: 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error';
+  currentVersion: string;
+  availableVersion?: string;
+  percent?: number;
+  transferred?: number;
+  total?: number;
+  message: string;
+  checkedAt?: number;
 };
 
 const defaultConfig: KawaicordConfig = {
@@ -34,7 +47,8 @@ const defaultConfig: KawaicordConfig = {
   trayIconTheme: 'dark',
   startAtLogin: false,
   minimizeToTray: false,
-  autoUpdateMods: true
+  autoUpdateMods: true,
+  autoUpdateApp: true
 };
 
 (window as any).kawaicord = {
@@ -44,6 +58,14 @@ const defaultConfig: KawaicordConfig = {
   getConfig: async () => await ipcRenderer.invoke('kawaicord:getConfig'),
   getRuntimeStatus: async () => await ipcRenderer.invoke('kawaicord:getRuntimeStatus'),
   setConfig: async (config: Partial<KawaicordConfig>) => await ipcRenderer.invoke('kawaicord:setConfig', config),
+  getUpdateStatus: async () => await ipcRenderer.invoke('kawaicord:getUpdateStatus'),
+  checkForUpdates: async () => await ipcRenderer.invoke('kawaicord:checkForUpdates'),
+  installUpdate: async () => await ipcRenderer.invoke('kawaicord:installUpdate'),
+  onUpdateStatus: (callback: (status: AppUpdateStatus) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: AppUpdateStatus) => callback(status);
+    ipcRenderer.on('kawaicord:updateStatus', listener);
+    return () => ipcRenderer.removeListener('kawaicord:updateStatus', listener);
+  },
   setTrayIcon: (theme: 'dark' | 'light') => ipcRenderer.send('kawaicord:setTrayIcon', theme),
   toggleTray: (enabled: boolean) => ipcRenderer.send('kawaicord:toggleTray', enabled),
   platform: process.platform,
@@ -108,20 +130,42 @@ function injectCompatibilityPatches() {
   })();`);
 }
 
-async function injectMod() {
-  const injectionStatus = {
-    shelter: false,
-    mod: null as ActiveMod | null,
-    restartHooks: 0,
-    error: null as string | null
-  };
-  (window as any).kawaicordInjectionStatus = injectionStatus;
+type InjectionStatus = {
+  shelter: boolean;
+  mod: ActiveMod | null;
+  restartHooks: number;
+  attempts: number;
+  reason: string;
+  error: string | null;
+};
 
-  try {
+const injectionStatus: InjectionStatus = {
+  shelter: false,
+  mod: null,
+  restartHooks: 0,
+  attempts: 0,
+  reason: 'preload',
+  error: null
+};
+(window as any).kawaicordInjectionStatus = injectionStatus;
+
+let injectionPromise: Promise<boolean> | null = null;
+let injectionComplete = false;
+let injectionRetryTimer: number | null = null;
+
+async function injectModOnce(reason: string): Promise<boolean> {
+  injectionStatus.attempts += 1;
+  injectionStatus.reason = reason;
+  injectionStatus.error = null;
+  const errors: string[] = [];
+
+  if (!injectionStatus.shelter) {
     try {
       const shelterBundle = await ipcRenderer.invoke('kawaicord:getShelterBundle') as { js?: string };
       if (shelterBundle?.js) {
         await webFrame.executeJavaScript(`(()=>{
+  if (window.__kawaicordShelterInjected === true) return;
+
   const SHELTER_INJECTOR_PLUGINS = {
     "kawaicord-settings": [
       "kawaicord://plugins/settings/",
@@ -150,6 +194,8 @@ async function injectMod() {
   ];
 
   ${shelterBundle.js}
+
+  window.__kawaicordShelterInjected = true;
 })()`);
         console.log('Shelter JS injected');
         injectionStatus.shelter = true;
@@ -158,9 +204,11 @@ async function injectMod() {
       }
     } catch (e) {
       console.error('Failed to inject Shelter:', e);
-      injectionStatus.error = `Shelter failed: ${e instanceof Error ? e.message : String(e)}`;
+      errors.push(`Shelter failed: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
 
+  try {
     const runtime = await ipcRenderer.invoke('kawaicord:getRuntimeStatus') as {
       activeMod: ActiveMod;
       safeMode: boolean;
@@ -168,8 +216,10 @@ async function injectMod() {
 
     if (runtime.safeMode) {
       console.warn('Recovery mode is active; Shelter loaded without Vencord or Equicord.');
-      return;
+      return injectionStatus.shelter;
     }
+
+    if (injectionStatus.mod === runtime.activeMod) return injectionStatus.shelter;
 
     const channel = runtime.activeMod === 'equicord'
       ? 'kawaicord:getEquicordBundle'
@@ -193,17 +243,70 @@ async function injectMod() {
       console.log(`Routed ${patchedBundle.restartHooks} ${runtime.activeMod} restart calls through Kawaicord.`);
     }
 
-    await webFrame.executeJavaScript(`${patchedBundle.source}\n//# sourceURL=kawaicord-${runtime.activeMod}.js`);
+    const alreadyInjected = await webFrame.executeJavaScript(
+      `window.__kawaicordClientMod === ${JSON.stringify(runtime.activeMod)}`
+    ) as boolean;
+    if (!alreadyInjected) {
+      // Keep the browser bundle at true page scope. Vencord and Equicord create
+      // globals during startup; wrapping the bundle in a function can strand
+      // those globals and intermittently prevent Discord from mounting.
+      await webFrame.executeJavaScript(
+        `${patchedBundle.source}\n//# sourceURL=kawaicord-${runtime.activeMod}.js`
+      );
+      await webFrame.executeJavaScript(
+        `window.__kawaicordClientMod = ${JSON.stringify(runtime.activeMod)}`
+      );
+    }
     if (bundle.css) await webFrame.insertCSS(bundle.css);
     injectionStatus.mod = runtime.activeMod;
     console.log(`${runtime.activeMod} injected`);
   } catch (error) {
     console.error('Failed to inject mod:', error);
-    injectionStatus.error = error instanceof Error ? error.message : String(error);
+    errors.push(error instanceof Error ? error.message : String(error));
   } finally {
+    injectionStatus.error = errors.length > 0 ? errors.join('; ') : null;
     ipcRenderer.send('kawaicord:injectionStatus', injectionStatus);
   }
+
+  return injectionStatus.shelter && injectionStatus.mod !== null && errors.length === 0;
 }
+
+function ensureClientModsInjected(reason: string): Promise<boolean> {
+  if (injectionComplete) return Promise.resolve(true);
+  if (injectionPromise) return injectionPromise;
+
+  if (injectionRetryTimer !== null) {
+    window.clearTimeout(injectionRetryTimer);
+    injectionRetryTimer = null;
+  }
+
+  injectionPromise = injectModOnce(reason)
+    .then(success => {
+      injectionComplete = success;
+      return success;
+    })
+    .catch(error => {
+      injectionStatus.error = error instanceof Error ? error.message : String(error);
+      ipcRenderer.send('kawaicord:injectionStatus', injectionStatus);
+      return false;
+    })
+    .finally(() => {
+      injectionPromise = null;
+      if (!injectionComplete && injectionStatus.attempts < 3) {
+        const delay = 500 * injectionStatus.attempts;
+        injectionRetryTimer = window.setTimeout(() => {
+          injectionRetryTimer = null;
+          void ensureClientModsInjected('automatic retry');
+        }, delay);
+      }
+    });
+
+  return injectionPromise;
+}
+
+ipcRenderer.on('kawaicord:ensureInjection', (_event, reason?: string) => {
+  void ensureClientModsInjected(reason || 'main-process check');
+});
 
 async function renderSettingsPage(targetContainer?: HTMLElement) {
   const container = targetContainer;
@@ -211,13 +314,17 @@ async function renderSettingsPage(targetContainer?: HTMLElement) {
     return;
   }
 
-  const rawConfig = await (window as any).kawaicord.getConfig() as Partial<KawaicordConfig>;
+  const [rawConfig, runtime, appVersion, initialUpdateStatus] = await Promise.all([
+    (window as any).kawaicord.getConfig() as Promise<Partial<KawaicordConfig>>,
+    (window as any).kawaicord.getRuntimeStatus() as Promise<{
+      activeMod: ActiveMod;
+      safeMode: boolean;
+      logPath: string;
+    }>,
+    (window as any).kawaicord.version() as Promise<string>,
+    (window as any).kawaicord.getUpdateStatus() as Promise<AppUpdateStatus>
+  ]);
   const config: KawaicordConfig = { ...defaultConfig, ...rawConfig };
-  const runtime = await (window as any).kawaicord.getRuntimeStatus() as {
-    activeMod: ActiveMod;
-    safeMode: boolean;
-    logPath: string;
-  };
 
   const modOptions: { value: ActiveMod; label: string }[] = [
     { value: 'vencord', label: 'Vencord' },
@@ -259,6 +366,7 @@ async function renderSettingsPage(targetContainer?: HTMLElement) {
     </div>
 
     <div class="kawaicord-section">
+      <div class="kawaicord-section-heading">Client</div>
       <div class="kawaicord-option">
         <div>
           <div class="kawaicord-option-label">Active Mod</div>
@@ -285,7 +393,7 @@ async function renderSettingsPage(targetContainer?: HTMLElement) {
       <div class="kawaicord-option">
         <div>
           <div class="kawaicord-option-label">Performance Mode</div>
-          <div class="kawaicord-option-desc">Reduce background rendering to 10 FPS without pausing notifications.</div>
+          <div class="kawaicord-option-desc">Pause decorative animation while hidden without delaying notifications, calls, or messages.</div>
         </div>
         <label class="kawaicord-switch">
           <input type="checkbox" id="kawaicord-perf-toggle" ${config.performanceMode ? 'checked' : ''}>
@@ -358,7 +466,37 @@ async function renderSettingsPage(targetContainer?: HTMLElement) {
           <span class="kawaicord-slider"></span>
         </label>
       </div>
+    </div>
 
+    <div class="kawaicord-section">
+      <div class="kawaicord-section-heading">Updates</div>
+      <div class="kawaicord-option">
+        <div>
+          <div class="kawaicord-option-label">Automatic App Updates</div>
+          <div class="kawaicord-option-desc">Check GitHub Releases in the background and download verified updates. Installation happens on restart or exit.</div>
+        </div>
+        <label class="kawaicord-switch">
+          <input type="checkbox" id="kawaicord-app-update-toggle" ${config.autoUpdateApp ? 'checked' : ''}>
+          <span class="kawaicord-slider"></span>
+        </label>
+      </div>
+
+      <div class="kawaicord-update-card" id="kawaicord-update-card" data-phase="idle">
+        <div class="kawaicord-update-copy">
+          <div class="kawaicord-update-version">Kawaicord ${appVersion}</div>
+          <div class="kawaicord-update-message" id="kawaicord-update-message" role="status" aria-live="polite"></div>
+          <div class="kawaicord-update-progress" id="kawaicord-update-progress" hidden>
+            <div class="kawaicord-update-progress-fill" id="kawaicord-update-progress-fill"></div>
+          </div>
+        </div>
+        <div class="kawaicord-update-actions">
+          <button type="button" class="kawaicord-btn kawaicord-btn-secondary" id="kawaicord-check-update-btn">Check for updates</button>
+          <button type="button" class="kawaicord-btn" id="kawaicord-install-update-btn" hidden>Restart and update</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="kawaicord-section kawaicord-section-actions">
       <div class="kawaicord-option">
         <button type="button" class="kawaicord-btn" id="kawaicord-restart-btn">Restart Kawaicord</button>
       </div>
@@ -366,6 +504,66 @@ async function renderSettingsPage(targetContainer?: HTMLElement) {
   `;
 
   const get = <T extends Element>(selector: string) => container.querySelector(selector) as T | null;
+
+  const updateCard = get<HTMLDivElement>('#kawaicord-update-card');
+  const updateMessage = get<HTMLDivElement>('#kawaicord-update-message');
+  const updateProgress = get<HTMLDivElement>('#kawaicord-update-progress');
+  const updateProgressFill = get<HTMLDivElement>('#kawaicord-update-progress-fill');
+  const checkUpdateButton = get<HTMLButtonElement>('#kawaicord-check-update-btn');
+  const installUpdateButton = get<HTMLButtonElement>('#kawaicord-install-update-btn');
+
+  const applyUpdateStatus = (status: AppUpdateStatus) => {
+    if (!status || !updateCard || !updateMessage || !checkUpdateButton || !installUpdateButton) return;
+    updateCard.dataset.phase = status.phase;
+    updateMessage.textContent = status.message;
+
+    const busy = status.phase === 'checking' || status.phase === 'available' || status.phase === 'downloading';
+    checkUpdateButton.disabled = busy || status.phase === 'downloaded' || status.phase === 'disabled';
+    checkUpdateButton.textContent = status.phase === 'checking'
+      ? 'Checking…'
+      : status.phase === 'available' || status.phase === 'downloading'
+        ? 'Downloading…'
+        : 'Check for updates';
+    installUpdateButton.hidden = status.phase !== 'downloaded';
+
+    const showProgress = status.phase === 'downloading' || status.phase === 'downloaded';
+    if (updateProgress && updateProgressFill) {
+      updateProgress.hidden = !showProgress;
+      const percent = status.phase === 'downloaded' ? 100 : Math.max(0, Math.min(100, status.percent ?? 0));
+      updateProgressFill.style.width = `${percent}%`;
+      updateProgress.setAttribute('aria-label', `${Math.round(percent)}% downloaded`);
+    }
+  };
+
+  const previousUpdateCleanup = (container as HTMLElement & { __kawaicordUpdateCleanup?: () => void })
+    .__kawaicordUpdateCleanup;
+  previousUpdateCleanup?.();
+  const unsubscribeUpdateStatus = (window as any).kawaicord.onUpdateStatus((status: AppUpdateStatus) => {
+    if (!container.isConnected) {
+      unsubscribeUpdateStatus();
+      return;
+    }
+    applyUpdateStatus(status);
+  });
+  (container as HTMLElement & { __kawaicordUpdateCleanup?: () => void }).__kawaicordUpdateCleanup =
+    unsubscribeUpdateStatus;
+  applyUpdateStatus(initialUpdateStatus);
+
+  checkUpdateButton?.addEventListener('click', async () => {
+    checkUpdateButton.disabled = true;
+    const status = await (window as any).kawaicord.checkForUpdates() as AppUpdateStatus;
+    applyUpdateStatus(status);
+  });
+
+  installUpdateButton?.addEventListener('click', async () => {
+    installUpdateButton.disabled = true;
+    installUpdateButton.textContent = 'Installing…';
+    const started = await (window as any).kawaicord.installUpdate() as boolean;
+    if (!started) {
+      installUpdateButton.disabled = false;
+      installUpdateButton.textContent = 'Restart and update';
+    }
+  });
 
   // --- Custom dropdown logic ---
   const dropdown = get<HTMLDivElement>('#kawaicord-mod-dropdown');
@@ -459,6 +657,10 @@ async function renderSettingsPage(targetContainer?: HTMLElement) {
 
   get<HTMLInputElement>('#kawaicord-update-toggle')?.addEventListener('change', async (e) => {
     await (window as any).kawaicord.setConfig({ autoUpdateMods: (e.target as HTMLInputElement).checked });
+  });
+
+  get<HTMLInputElement>('#kawaicord-app-update-toggle')?.addEventListener('change', async (e) => {
+    await (window as any).kawaicord.setConfig({ autoUpdateApp: (e.target as HTMLInputElement).checked });
   });
 
   get<HTMLInputElement>('#kawaicord-arrpc-toggle')?.addEventListener('change', async (e) => {
@@ -569,6 +771,17 @@ function injectSettingsCss() {
   margin-bottom: 40px;
 }
 
+.kawaicord-section-heading {
+  margin-bottom: 6px;
+  color: var(--header-primary);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.kawaicord-section-actions {
+  margin-bottom: 0;
+}
+
 .kawaicord-option {
   display: flex;
   justify-content: space-between;
@@ -589,6 +802,69 @@ function injectSettingsCss() {
   font-size: 13px;
   color: var(--text-muted);
   margin-top: 4px;
+}
+
+.kawaicord-update-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--background-modifier-accent);
+  border-radius: 12px;
+  background: var(--background-secondary, var(--background-base-low));
+}
+
+.kawaicord-update-card[data-phase="downloaded"] {
+  border-color: color-mix(in srgb, #4ade80 42%, transparent);
+}
+
+.kawaicord-update-card[data-phase="error"] {
+  border-color: color-mix(in srgb, #f23f43 42%, transparent);
+}
+
+.kawaicord-update-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.kawaicord-update-version {
+  color: var(--header-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.kawaicord-update-message {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.kawaicord-update-progress {
+  width: min(360px, 100%);
+  height: 4px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--background-modifier-accent);
+}
+
+.kawaicord-update-progress-fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--kawaicord-accent-strong);
+  transition: width 120ms linear;
+}
+
+.kawaicord-update-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
 }
 
 /* Custom Dropdown */
@@ -830,6 +1106,31 @@ function injectSettingsCss() {
 .kawaicord-btn:hover {
   background-color: #9333ea;
 }
+
+.kawaicord-btn-secondary {
+  background-color: var(--button-secondary-background, var(--background-modifier-accent));
+  color: var(--button-secondary-text, var(--text-normal));
+}
+
+.kawaicord-btn-secondary:hover {
+  background-color: var(--button-secondary-background-hover, var(--background-modifier-hover));
+}
+
+.kawaicord-btn:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+@media (max-width: 720px) {
+  .kawaicord-update-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .kawaicord-update-actions {
+    justify-content: flex-end;
+  }
+}
 `;
 
   document.head.appendChild(style);
@@ -842,6 +1143,234 @@ function setImportantStyle(element: HTMLElement, property: string, value: string
   ) {
     element.style.setProperty(property, value, 'important');
   }
+}
+
+function injectBootSplash() {
+  const mount = () => {
+    if (!document.body || document.getElementById('kawaicord-boot-splash')) return false;
+
+    const host = document.createElement('div');
+    host.id = 'kawaicord-boot-splash';
+    host.setAttribute('aria-label', 'Loading Discord');
+    host.setAttribute('role', 'status');
+    const lockedStyles: Record<string, string> = {
+      position: 'fixed',
+      inset: '0px',
+      'z-index': '2147483645',
+      display: 'grid',
+      margin: '0px',
+      padding: '0px',
+      border: '0px',
+      transform: 'none',
+      opacity: '1',
+      visibility: 'visible',
+      'pointer-events': 'none',
+      'background-color': '#111214',
+      isolation: 'isolate',
+      contain: 'strict'
+    };
+    for (const [property, value] of Object.entries(lockedStyles)) {
+      setImportantStyle(host, property, value);
+    }
+
+    const shadow = host.attachShadow({ mode: 'closed' });
+    const style = document.createElement('style');
+    style.textContent = `
+      :host {
+        color: #dbdee1;
+        font-family: "gg sans", "Segoe UI", sans-serif;
+      }
+      .splash {
+        display: grid;
+        min-width: 180px;
+        place-items: center;
+        gap: 14px;
+        transform: translateY(-12px);
+      }
+      svg {
+        width: 52px;
+        height: 52px;
+        filter: drop-shadow(0 8px 22px rgba(168, 85, 247, 0.24));
+      }
+      .label {
+        color: #b5bac1;
+        font-size: 13px;
+        font-weight: 500;
+        letter-spacing: 0.01em;
+      }
+      .detail {
+        max-width: 360px;
+        color: #949ba4;
+        font-size: 12px;
+        line-height: 1.45;
+        text-align: center;
+      }
+      .retry {
+        padding: 8px 14px;
+        border: 0;
+        border-radius: 6px;
+        color: #fff;
+        background: #7c3aed;
+        font-family: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 18px;
+        cursor: pointer;
+      }
+      .retry:hover { background: #6d28d9; }
+      [hidden] { display: none !important; }
+      .dots {
+        display: flex;
+        gap: 5px;
+      }
+      .dots span {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: #c084fc;
+        animation: pulse 900ms ease-in-out infinite alternate;
+      }
+      .dots span:nth-child(2) { animation-delay: 150ms; }
+      .dots span:nth-child(3) { animation-delay: 300ms; }
+      @keyframes pulse {
+        from { opacity: 0.3; transform: translateY(1px); }
+        to { opacity: 1; transform: translateY(-2px); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .dots span { animation: none; opacity: 0.8; }
+      }
+    `;
+    const content = document.createElement('div');
+    content.className = 'splash';
+    content.innerHTML = `
+      <svg viewBox="0 0 64 64" aria-hidden="true">
+        <defs>
+          <linearGradient id="kawaicord-splash-gradient" x1="12" y1="8" x2="52" y2="56" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#8b5cf6"/>
+            <stop offset="1" stop-color="#ec4899"/>
+          </linearGradient>
+        </defs>
+        <path fill="url(#kawaicord-splash-gradient)" d="M13 18.5 21.5 10l4.2 7.1a25 25 0 0 1 12.6 0l4.2-7.1 8.5 8.5A23 23 0 0 1 55 31.4C55 44.4 44.7 54 32 54S9 44.4 9 31.4a23 23 0 0 1 4-12.9Z"/>
+        <path fill="#fff" d="M23.5 29.5a3 3 0 1 1 0 6 3 3 0 0 1 0-6Zm17 0a3 3 0 1 1 0 6 3 3 0 0 1 0-6Z"/>
+        <path fill="#ffd8e8" d="M28 39.1c0-2.2 2-3.6 4-2.1 2-1.5 4-.1 4 2.1 0 2.8-4 5.1-4 5.1s-4-2.3-4-5.1Z"/>
+      </svg>
+      <div class="label">Loading Discord</div>
+      <div class="detail" hidden>Kawaicord tried normal and recovery-mode reloads. You can safely try again.</div>
+      <div class="dots" aria-hidden="true"><span></span><span></span><span></span></div>
+      <button type="button" class="retry" hidden>Retry Discord</button>
+    `;
+    shadow.append(style, content);
+    document.body.appendChild(host);
+
+    const label = content.querySelector<HTMLElement>('.label')!;
+    const detail = content.querySelector<HTMLElement>('.detail')!;
+    const dots = content.querySelector<HTMLElement>('.dots')!;
+    const retryButton = content.querySelector<HTMLButtonElement>('.retry')!;
+    let checkFrame: number | null = null;
+    let readyFrames = 0;
+    let slowTimer: number | null = null;
+    let failureTimer: number | null = null;
+    let finished = false;
+    const showFailure = () => {
+      if (finished) return;
+      label.textContent = 'Discord could not start';
+      detail.hidden = false;
+      dots.hidden = true;
+      retryButton.hidden = false;
+      setImportantStyle(host, 'pointer-events', 'auto');
+    };
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      observer.disconnect();
+      if (checkFrame !== null) window.cancelAnimationFrame(checkFrame);
+      if (slowTimer !== null) window.clearTimeout(slowTimer);
+      if (failureTimer !== null) window.clearTimeout(failureTimer);
+      host.remove();
+    };
+    const checkReady = () => {
+      checkFrame = null;
+      const appMount = document.getElementById('app-mount') ||
+        document.querySelector<HTMLElement>('[class*="appMount"]');
+      const contentRoot = appMount || document.querySelector<HTMLElement>(
+        'main, nav, [role="tree"], [class*="sidebar"]'
+      );
+      const contentText = appMount?.textContent?.trim() || document.body.innerText.trim();
+      const visibleContent = Boolean(
+        contentRoot &&
+        (contentText.length > 10 || contentRoot.querySelector('button, input, [role="button"]'))
+      );
+      readyFrames = visibleContent ? readyFrames + 1 : 0;
+      if (readyFrames >= 2) {
+        ipcRenderer.send('kawaicord:discordReady');
+        finish();
+      }
+    };
+    const scheduleReadyCheck = () => {
+      if (checkFrame === null) checkFrame = window.requestAnimationFrame(checkReady);
+    };
+    const observer = new MutationObserver(scheduleReadyCheck);
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    window.addEventListener('load', scheduleReadyCheck, { once: true });
+    ipcRenderer.once('kawaicord:discordFailed', showFailure);
+    retryButton.addEventListener('click', () => void (window as any).kawaicord.reload());
+    slowTimer = window.setTimeout(() => {
+      if (!finished) label.textContent = 'Discord is taking longer than usual…';
+    }, 12_000);
+    failureTimer = window.setTimeout(showFailure, 70_000);
+    scheduleReadyCheck();
+    return true;
+  };
+
+  if (mount()) return;
+  const documentObserver = new MutationObserver(() => {
+    if (mount()) documentObserver.disconnect();
+  });
+  documentObserver.observe(document, { childList: true, subtree: true });
+}
+
+let rendererBackgrounded = false;
+const backgroundListeners = new Set<(hidden: boolean) => void>();
+let cacheReleaseTimer: number | undefined;
+function applyBackgroundState(hidden: boolean) {
+  document.documentElement.dataset.kawaicordBackgrounded = String(hidden);
+  if (rendererBackgrounded === hidden) return;
+  rendererBackgrounded = hidden;
+  window.clearTimeout(cacheReleaseTimer);
+  cacheReleaseTimer = undefined;
+  for (const listener of backgroundListeners) listener(hidden);
+  if (hidden) {
+    // One check per hidden period; no polling, forced GC, or storage eviction.
+    cacheReleaseTimer = window.setTimeout(() => {
+      cacheReleaseTimer = undefined;
+      if (!rendererBackgrounded) return;
+      const mediaPlaying = Array.from(document.querySelectorAll<HTMLMediaElement>('video, audio'))
+        .some(media => !media.paused && !media.ended);
+      const { size, liveSize } = webFrame.getResourceUsage().images;
+      if (shouldReleaseImageCache(size, liveSize, mediaPlaying)) webFrame.clearCache();
+    }, 60_000);
+  }
+}
+
+function injectPerformanceCss() {
+  if (document.getElementById('kawaicord-performance-style')) return;
+  const style = document.createElement('style');
+  style.id = 'kawaicord-performance-style';
+  style.textContent = `
+    html[data-kawaicord-backgrounded="true"] *,
+    html[data-kawaicord-backgrounded="true"] *::before,
+    html[data-kawaicord-backgrounded="true"] *::after {
+      animation-play-state: paused !important;
+      transition-duration: 0s !important;
+      scroll-behavior: auto !important;
+    }
+    /* Suppress image paint/animated avatars only while the window is hidden.
+       Keep layout, audio/video elements, and all application timers intact. */
+    html[data-kawaicord-backgrounded="true"] #app-mount img {
+      visibility: hidden !important;
+    }
+  `;
+  document.head.appendChild(style);
 }
 
 function lockWindowControlHost(host: HTMLElement) {
@@ -884,10 +1413,84 @@ function lockWindowControlHost(host: HTMLElement) {
   }
 }
 
-function lockNativeAppBar() {
+function lockNavigationHost(host: HTMLElement) {
+  const lockedStyles: Record<string, string> = {
+    position: 'fixed',
+    top: '0px',
+    right: 'auto',
+    bottom: 'auto',
+    left: '0px',
+    'z-index': '2147483646',
+    display: 'block',
+    width: '80px',
+    height: `${TITLEBAR_FALLBACK_HEIGHT}px`,
+    'min-width': '80px',
+    'max-width': '80px',
+    'min-height': `${TITLEBAR_FALLBACK_HEIGHT}px`,
+    'max-height': `${TITLEBAR_FALLBACK_HEIGHT}px`,
+    margin: '0px',
+    padding: '0px',
+    border: '0px',
+    transform: 'none',
+    overflow: 'hidden',
+    isolation: 'isolate',
+    contain: 'layout style',
+    'box-sizing': 'border-box',
+    'pointer-events': 'auto',
+    visibility: 'visible',
+    opacity: '1',
+    color: 'var(--interactive-icon-default, var(--interactive-normal, #b5bac1))',
+    'background-color': 'var(--background-base-lowest, var(--background-tertiary, #111214))',
+    'font-family': 'var(--font-primary, "gg sans", "Segoe UI", sans-serif)',
+    '-webkit-app-region': 'no-drag'
+  };
+
+  for (const [property, value] of Object.entries(lockedStyles)) {
+    setImportantStyle(host, property, value);
+  }
+}
+
+function lockDragRegionHost(host: HTMLElement, rightInset = 250) {
+  const lockedStyles: Record<string, string> = {
+    position: 'fixed',
+    top: '0px',
+    right: `${Math.max(TITLEBAR_RESERVED_WIDTH, Math.round(rightInset))}px`,
+    bottom: 'auto',
+    left: '80px',
+    'z-index': '2147483644',
+    display: 'block',
+    height: `${TITLEBAR_FALLBACK_HEIGHT}px`,
+    'min-height': `${TITLEBAR_FALLBACK_HEIGHT}px`,
+    'max-height': `${TITLEBAR_FALLBACK_HEIGHT}px`,
+    margin: '0px',
+    padding: '0px',
+    border: '0px',
+    transform: 'none',
+    'background-color': 'transparent',
+    'pointer-events': 'auto',
+    visibility: 'visible',
+    opacity: '1',
+    'box-sizing': 'border-box',
+    'app-region': 'drag',
+    '-webkit-app-region': 'drag',
+    'user-select': 'none'
+  };
+
+  for (const [property, value] of Object.entries(lockedStyles)) {
+    setImportantStyle(host, property, value);
+  }
+}
+
+type NativeAppBarElements = {
+  bar: HTMLElement;
+  title: HTMLElement;
+  trailing: HTMLElement;
+};
+
+function lockNativeAppBar(): NativeAppBarElements | null {
   const root = document.documentElement;
   const body = document.body;
-  if (!root || !body) return;
+  if (!root || !body) return null;
 
   setImportantStyle(root, '--custom-app-top-bar-height', `${TITLEBAR_FALLBACK_HEIGHT}px`);
   setImportantStyle(root, '--kawaicord-titlebar-height', `${TITLEBAR_FALLBACK_HEIGHT}px`);
@@ -904,6 +1507,10 @@ function lockNativeAppBar() {
 
   const host = document.getElementById('kawaicord-window-controls');
   if (host) lockWindowControlHost(host);
+  const navigationHost = document.getElementById('kawaicord-navigation-controls');
+  if (navigationHost) lockNavigationHost(navigationHost);
+  const dragRegionHost = document.getElementById('kawaicord-titlebar-drag-region');
+  if (dragRegionHost) lockDragRegionHost(dragRegionHost);
 
   const trailingCandidates = document.querySelectorAll<HTMLElement>(
     'div[class*="title"] + div[class*="trailing"]'
@@ -916,7 +1523,12 @@ function lockNativeAppBar() {
   });
   const title = trailing?.previousElementSibling as HTMLElement | null;
   const bar = trailing?.parentElement;
-  if (!trailing || !title || !bar) return;
+  if (!trailing || !title || !bar) return null;
+
+  if (dragRegionHost) {
+    const rightInset = window.innerWidth - trailing.getBoundingClientRect().left + 8;
+    lockDragRegionHost(dragRegionHost, rightInset);
+  }
 
   const barStyles: Record<string, string> = {
     height: `${TITLEBAR_FALLBACK_HEIGHT}px`,
@@ -928,7 +1540,8 @@ function lockNativeAppBar() {
     scale: 'none',
     rotate: 'none',
     overflow: 'visible',
-    'box-sizing': 'border-box'
+    'box-sizing': 'border-box',
+    '-webkit-app-region': 'drag'
   };
   for (const [property, value] of Object.entries(barStyles)) {
     setImportantStyle(bar, property, value);
@@ -942,6 +1555,7 @@ function lockNativeAppBar() {
   }
   setImportantStyle(trailing, 'margin-inline-end', `${TITLEBAR_RESERVED_WIDTH}px`);
   setImportantStyle(trailing, 'margin-right', `${TITLEBAR_RESERVED_WIDTH}px`);
+  setImportantStyle(trailing, '-webkit-app-region', 'no-drag');
 
   for (const interactive of Array.from(
     bar.querySelectorAll<HTMLElement>('button, a, [role="button"]')
@@ -949,7 +1563,10 @@ function lockNativeAppBar() {
     setImportantStyle(interactive, 'transform', 'none');
     setImportantStyle(interactive, 'translate', 'none');
     setImportantStyle(interactive, 'visibility', 'visible');
+    setImportantStyle(interactive, '-webkit-app-region', 'no-drag');
   }
+
+  return { bar, title, trailing };
 }
 
 function injectTitlebar() {
@@ -959,6 +1576,29 @@ function injectTitlebar() {
   globalStyle.id = 'kawaicord-titlebar-style';
   globalStyle.textContent = KAWAICORD_TITLEBAR_CSS;
   document.head.appendChild(globalStyle);
+
+  const dragRegionHost = document.createElement('div');
+  dragRegionHost.id = 'kawaicord-titlebar-drag-region';
+  dragRegionHost.setAttribute('aria-hidden', 'true');
+  lockDragRegionHost(dragRegionHost);
+  document.body.appendChild(dragRegionHost);
+
+  const navigationHost = document.createElement('div');
+  navigationHost.id = 'kawaicord-navigation-controls';
+  navigationHost.setAttribute('role', 'group');
+  navigationHost.setAttribute('aria-label', 'Navigation controls');
+  lockNavigationHost(navigationHost);
+  const navigationShadow = navigationHost.attachShadow({ mode: 'closed' });
+  const navigationStyle = document.createElement('style');
+  navigationStyle.textContent = KAWAICORD_WINDOW_CONTROLS_CSS;
+  const navigationControls = document.createElement('div');
+  navigationControls.className = 'navigation';
+  navigationControls.innerHTML = `
+    <button type="button" aria-label="Go back" title="Go back"><span class="icon back-icon"></span></button>
+    <button type="button" aria-label="Go forward" title="Go forward"><span class="icon forward-icon"></span></button>
+  `;
+  navigationShadow.append(navigationStyle, navigationControls);
+  document.body.appendChild(navigationHost);
 
   const host = document.createElement('div');
   host.id = 'kawaicord-window-controls';
@@ -982,42 +1622,88 @@ function injectTitlebar() {
   const [minimizeButton, maximizeButton, closeButton] = Array.from(
     controls.querySelectorAll<HTMLButtonElement>('button')
   );
-  let maximizeSyncTimer: number | null = null;
-  const syncMaximizedState = async () => {
-    maximizeSyncTimer = null;
-    const maximized = await ipcRenderer.invoke('window:isMaximized') as boolean;
-    host.dataset.maximized = String(Boolean(maximized));
-    document.body.dataset.kawaicordMaximized = String(Boolean(maximized));
+  const [backButton, forwardButton] = Array.from(
+    navigationControls.querySelectorAll<HTMLButtonElement>('button')
+  );
+  const applyWindowState = (state: {
+    maximized?: boolean;
+    focused?: boolean;
+    backgrounded?: boolean;
+  }) => {
+    const maximized = Boolean(state.maximized);
+    host.dataset.maximized = String(maximized);
+    host.dataset.focused = String(state.focused !== false);
+    document.body.dataset.kawaicordMaximized = String(maximized);
+    applyBackgroundState(Boolean(state.backgrounded));
     const label = maximized ? 'Restore' : 'Maximize';
     maximizeButton.setAttribute('aria-label', label);
     maximizeButton.setAttribute('title', label);
   };
-  const scheduleMaximizedSync = () => {
-    if (maximizeSyncTimer !== null) window.clearTimeout(maximizeSyncTimer);
-    maximizeSyncTimer = window.setTimeout(() => void syncMaximizedState(), 80);
+  const syncWindowState = async () => {
+    const state = await ipcRenderer.invoke('window:getState') as {
+      maximized?: boolean;
+      focused?: boolean;
+      backgrounded?: boolean;
+    };
+    applyWindowState(state);
   };
 
   minimizeButton.addEventListener('click', () => ipcRenderer.send('window:minimize'));
-  maximizeButton.addEventListener('click', () => {
-    ipcRenderer.send('window:maximize');
-    scheduleMaximizedSync();
-  });
+  maximizeButton.addEventListener('click', () => ipcRenderer.send('window:maximize'));
   closeButton.addEventListener('click', () => ipcRenderer.send('window:close'));
-  window.addEventListener('resize', scheduleMaximizedSync, { passive: true });
+  backButton.addEventListener('click', () => ipcRenderer.send('window:navigateBack'));
+  forwardButton.addEventListener('click', () => ipcRenderer.send('window:navigateForward'));
+  ipcRenderer.on('window:stateChanged', (_event, state) => applyWindowState(state || {}));
+  const applyNavigationState = (state: { canGoBack?: boolean; canGoForward?: boolean }) => {
+    backButton.disabled = !state.canGoBack;
+    forwardButton.disabled = !state.canGoForward;
+  };
+  ipcRenderer.on('window:navigationState', (_event, state) => applyNavigationState(state || {}));
+  ipcRenderer.on('window:backgroundedChanged', (_event, backgrounded) => {
+    applyBackgroundState(Boolean(backgrounded));
+  });
 
   let guardFrame: number | null = null;
+  let protectedBar: HTMLElement | null = null;
+  const protectedBarObserver = new MutationObserver(() => scheduleGuard());
+  const protectedBarResizeObserver = new ResizeObserver(() => scheduleGuard());
   const enforceLocks = () => {
     guardFrame = null;
+    if (rendererBackgrounded) return;
     if (!globalStyle.isConnected) document.head.appendChild(globalStyle);
-    lockNativeAppBar();
+    const nativeAppBar = lockNativeAppBar();
+    if (!nativeAppBar && protectedBar && !protectedBar.isConnected) {
+      protectedBar = null;
+      protectedBarObserver.disconnect();
+      protectedBarResizeObserver.disconnect();
+      mountObserver.observe(document.body, { childList: true, subtree: true });
+    }
+    if (nativeAppBar && nativeAppBar.bar !== protectedBar) {
+      protectedBar = nativeAppBar.bar;
+      mountObserver.disconnect();
+      protectedBarObserver.disconnect();
+      protectedBarResizeObserver.disconnect();
+      for (const element of [nativeAppBar.bar, nativeAppBar.title, nativeAppBar.trailing]) {
+        protectedBarObserver.observe(element, {
+          attributes: true,
+          attributeFilter: ['class', 'style', 'hidden']
+        });
+        protectedBarResizeObserver.observe(element);
+      }
+      const barParent = nativeAppBar.bar.parentElement;
+      if (barParent) protectedBarObserver.observe(barParent, { childList: true });
+      protectedBarResizeObserver.observe(host);
+    }
   };
   const scheduleGuard = () => {
+    if (rendererBackgrounded) return;
     if (guardFrame === null) guardFrame = window.requestAnimationFrame(enforceLocks);
   };
 
-  const layoutObserver = new MutationObserver(scheduleGuard);
-  layoutObserver.observe(document.head, { childList: true });
-  layoutObserver.observe(document.body, { childList: true, subtree: true });
+  const headObserver = new MutationObserver(scheduleGuard);
+  headObserver.observe(document.head, { childList: true, subtree: true });
+  const mountObserver = new MutationObserver(scheduleGuard);
+  mountObserver.observe(document.body, { childList: true, subtree: true });
 
   const protectedAttributeObserver = new MutationObserver(scheduleGuard);
   protectedAttributeObserver.observe(document.documentElement, {
@@ -1032,9 +1718,33 @@ function injectTitlebar() {
     attributes: true,
     attributeFilter: ['class', 'style', 'hidden']
   });
+  protectedAttributeObserver.observe(navigationHost, {
+    attributes: true,
+    attributeFilter: ['class', 'style', 'hidden']
+  });
+  protectedAttributeObserver.observe(dragRegionHost, {
+    attributes: true,
+    attributeFilter: ['class', 'style', 'hidden']
+  });
 
-  lockNativeAppBar();
-  void syncMaximizedState();
+  backgroundListeners.add(hidden => {
+    if (hidden) {
+      if (guardFrame !== null) window.cancelAnimationFrame(guardFrame);
+      guardFrame = null;
+      headObserver.disconnect();
+      mountObserver.disconnect();
+      protectedBarObserver.disconnect();
+      protectedBarResizeObserver.disconnect();
+    } else {
+      protectedBar = null;
+      headObserver.observe(document.head, { childList: true, subtree: true });
+      mountObserver.observe(document.body, { childList: true, subtree: true });
+      enforceLocks();
+    }
+  });
+  enforceLocks();
+  void syncWindowState();
+  void ipcRenderer.invoke('window:getNavigationState').then(applyNavigationState);
 }
 
 function initThemeObserver() {
@@ -1052,6 +1762,7 @@ function initThemeObserver() {
 
   const updateTheme = () => {
     updateTimer = null;
+    if (rendererBackgrounded) return;
     const controls = document.getElementById('kawaicord-window-controls');
     if (controls) {
       const color = cssRgbToHex(getComputedStyle(controls).backgroundColor);
@@ -1072,6 +1783,7 @@ function initThemeObserver() {
     }
   };
   const scheduleUpdate = () => {
+    if (rendererBackgrounded) return;
     if (updateTimer !== null) window.clearTimeout(updateTimer);
     updateTimer = window.setTimeout(updateTheme, 50);
   };
@@ -1085,14 +1797,48 @@ function initThemeObserver() {
   }
 
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', scheduleUpdate);
+  backgroundListeners.add(hidden => {
+    if (hidden && updateTimer !== null) {
+      window.clearTimeout(updateTimer);
+      updateTimer = null;
+    }
+    if (!hidden) scheduleUpdate();
+  });
   scheduleUpdate();
+}
+
+function initUnreadBadgeObserver() {
+  let lastUnread = -1;
+  const updateUnread = () => {
+    const match = document.title.match(/^\(([\d,]+)\)/);
+    const unread = match ? Number(match[1].replace(/,/g, '')) : 0;
+    if (unread === lastUnread || !Number.isFinite(unread)) return;
+    lastUnread = unread;
+    ipcRenderer.send('window:setUnreadCount', unread);
+  };
+
+  const titleObserver = new MutationObserver(updateUnread);
+  const watchTitle = () => {
+    titleObserver.disconnect();
+    const title = document.querySelector('title');
+    if (title) titleObserver.observe(title, { childList: true, subtree: true, characterData: true });
+    updateUnread();
+  };
+  // Stylesheet churn must not trigger badge IPC or title parsing.
+  new MutationObserver(watchTitle).observe(document.head, { childList: true });
+  watchTitle();
+  updateUnread();
 }
 
 window.addEventListener('DOMContentLoaded', () => {
   injectSettingsCss();
+  injectPerformanceCss();
   injectTitlebar();
   initThemeObserver();
+  initUnreadBadgeObserver();
+  void ensureClientModsInjected('DOM ready');
 });
 
 injectCompatibilityPatches();
-injectMod();
+injectBootSplash();
+void ensureClientModsInjected('preload');

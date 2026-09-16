@@ -6,7 +6,7 @@ const test = require('node:test');
 const { routeClientModRestarts } = require('../dist/mod-patches.js');
 
 const workspace = path.resolve(__dirname, '..');
-const reloadCall = /(^|[^\w$.])(?:window\s*\.\s*)?location\s*\.\s*reload\s*\(\s*\)/gm;
+const reloadCall = /(^|[^\w$.])(?:(?:window|globalThis|document)\s*\.\s*)?location\s*\.\s*reload\s*\(\s*(?:true|false)?\s*\)/gm;
 
 for (const mod of ['vencord', 'equicord']) {
   test(`routes every ${mod} browser restart through Kawaicord`, () => {
@@ -25,9 +25,17 @@ for (const mod of ['vencord', 'equicord']) {
 }
 
 test('does not alter unrelated reload methods', () => {
-  const source = 'player.reload(); object.location.reload(); location.reload(true);';
+  const source = 'player.reload(); object.location.reload(); custom.window.location.reload();';
   const patched = routeClientModRestarts(source);
 
   assert.equal(patched.restartHooks, 0);
   assert.equal(patched.source, source);
+});
+
+test('routes hard reload variants used by mod restart actions', () => {
+  const source = 'location.reload(true); window.location.reload(false); globalThis.location.reload(); document.location.reload();';
+  const patched = routeClientModRestarts(source);
+
+  assert.equal(patched.restartHooks, 4);
+  assert.equal([...patched.source.matchAll(/window\.kawaicord\.restart\(\)/g)].length, 4);
 });

@@ -21,6 +21,12 @@ test('window controls share Discord native app bar without covering its UI', () 
   assert.match(KAWAICORD_WINDOW_CONTROLS_CSS, /:host/);
   assert.match(KAWAICORD_WINDOW_CONTROLS_CSS, /all: unset/);
   assert.match(KAWAICORD_WINDOW_CONTROLS_CSS, /background-color: var\(--background-base-lowest/);
+  assert.match(KAWAICORD_WINDOW_CONTROLS_CSS, /-webkit-mask-image/);
+  assert.match(KAWAICORD_WINDOW_CONTROLS_CSS, /:host\(\[data-focused="false"\]\)/);
+  assert.match(KAWAICORD_WINDOW_CONTROLS_CSS, /background-color: #e81123/);
+  assert.match(KAWAICORD_WINDOW_CONTROLS_CSS, /\.back-icon/);
+  assert.match(KAWAICORD_WINDOW_CONTROLS_CSS, /\.forward-icon/);
+  assert.match(KAWAICORD_TITLEBAR_CSS, /-webkit-app-region: drag !important/);
 });
 
 test('third-party themes cannot restyle or collapse protected window chrome', () => {
@@ -29,7 +35,21 @@ test('third-party themes cannot restyle or collapse protected window chrome', ()
   assert.match(preload, /setImportantStyle\(root, '--custom-app-top-bar-height'/);
   assert.match(preload, /setImportantStyle\(trailing, 'margin-right'/);
   assert.match(preload, /lockWindowControlHost\(host\)/);
+  assert.match(preload, /new ResizeObserver/);
+  assert.match(preload, /attributeFilter: \['class', 'style', 'hidden'\]/);
+  assert.match(preload, /kawaicord-navigation-controls/);
+  assert.match(preload, /kawaicord-titlebar-drag-region/);
+  assert.match(preload, /lockDragRegionHost/);
+  assert.match(preload, /'app-region': 'drag'/);
   assert.doesNotMatch(KAWAICORD_WINDOW_CONTROLS_CSS, /\.theme-/);
+});
+
+test('unread Discord titles drive a Windows taskbar overlay', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'dist', 'main.js'), 'utf8');
+  const preload = fs.readFileSync(path.join(__dirname, '..', 'dist', 'preload.js'), 'utf8');
+  assert.match(preload, /window:setUnreadCount/);
+  assert.match(main, /setOverlayIcon/);
+  assert.match(main, /99\+/);
 });
 
 test('computed Discord colors are normalized for Electron', () => {

@@ -17,12 +17,14 @@ import {
 import * as path from 'path';
 import * as fs from 'fs';
 import { pathToFileURL } from 'url';
+import { autoUpdater } from 'electron-updater';
 import { getDetectables, addDetectable } from './detectables';
+import { getRendererReloadRequest } from './reload';
 import { restoreWindowState, StoredWindowState } from './window-state';
 
-// Fix for cache and network issues
-// app.commandLine.appendSwitch('disable-http-cache'); // Removed as it causes slow loading
-app.commandLine.appendSwitch('ignore-gpu-blocklist');
+// Keep the stable acceleration paths enabled without overriding Chromium's
+// GPU safety blocklist. Unsupported drivers should fall back instead of
+// entering a GPU crash loop.
 app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('enable-zero-copy');
 app.commandLine.appendSwitch('enable-accelerated-video-decode');
@@ -52,12 +54,21 @@ let tray: Tray | null = null;
 let isQuitting = false;
 let restartInProgress = false;
 let windowStateSaveTimer: NodeJS.Timeout | null = null;
-let appliedFrameRate: number | null = null;
 let appliedBackgroundThrottling: boolean | null = null;
+let appliedRendererBackgrounded: boolean | null = null;
+let rendererInjectionReady = false;
+let injectionWatchdogTimer: NodeJS.Timeout | null = null;
+let discordHealthWatchdogTimer: NodeJS.Timeout | null = null;
+let discordRecoveryAttempts = 0;
+let discordRendererReady = false;
+let rendererRecoveryTimer: NodeJS.Timeout | null = null;
+let unresponsiveDialogOpen = false;
+let modBundleRefreshTimer: NodeJS.Timeout | null = null;
 let sessionSafeMode = process.argv.includes('--safe-mode');
 const smokeTestMode = process.argv.includes('--smoke-test');
 const restartSmokeTestMode = process.argv.includes('--restart-smoke-test');
 let rendererCrashCount = 0;
+let rendererCrashWindowStartedAt = 0;
 const vencordDataPath = path.join(app.getPath('userData'), 'vencord_data');
 const configPath = path.join(app.getPath('userData'), 'kawaicord_config.json');
 const recoveryPath = path.join(app.getPath('userData'), 'kawaicord_recovery.json');
@@ -65,18 +76,136 @@ const logPath = path.join(app.getPath('userData'), 'kawaicord.log');
 const windowStatePath = path.join(app.getPath('userData'), 'kawaicord_window.json');
 const discordPartition = 'persist:discord';
 
+function clearInjectionWatchdog() {
+  if (injectionWatchdogTimer) {
+    clearTimeout(injectionWatchdogTimer);
+    injectionWatchdogTimer = null;
+  }
+}
+
+function clearDiscordHealthWatchdog() {
+  if (discordHealthWatchdogTimer) {
+    clearTimeout(discordHealthWatchdogTimer);
+    discordHealthWatchdogTimer = null;
+  }
+}
+
+function markRendererNavigation() {
+  rendererInjectionReady = false;
+  discordRendererReady = false;
+  clearInjectionWatchdog();
+  clearDiscordHealthWatchdog();
+}
+
+function requestRendererInjection(reason: string) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('kawaicord:ensureInjection', reason);
+  clearInjectionWatchdog();
+  injectionWatchdogTimer = setTimeout(() => {
+    injectionWatchdogTimer = null;
+    if (!rendererInjectionReady && mainWindow && !mainWindow.isDestroyed()) {
+      appendLog('warn', `Renderer injection was not ready after navigation (${reason}); requesting a retry.`);
+      mainWindow.webContents.send('kawaicord:ensureInjection', 'main-process watchdog');
+    }
+  }, 8000);
+}
+
+function reloadDiscord(reason: string, ignoreCache = false) {
+  if (!mainWindow || mainWindow.isDestroyed() || isQuitting || restartInProgress) return;
+  markRendererNavigation();
+  appendLog('info', `Reloading Discord renderer (${reason}).`);
+  if (ignoreCache) {
+    mainWindow.webContents.reloadIgnoringCache();
+  } else {
+    mainWindow.webContents.reload();
+  }
+}
+
+function getNavigationState() {
+  const history = mainWindow?.webContents.navigationHistory;
+  return {
+    canGoBack: Boolean(history?.canGoBack()),
+    canGoForward: Boolean(history?.canGoForward())
+  };
+}
+
+function sendNavigationState() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('window:navigationState', getNavigationState());
+}
+
+function isTrustedDiscordRenderer(event: Electron.IpcMainInvokeEvent) {
+  try {
+    const senderUrl = event.senderFrame?.url || event.sender.getURL();
+    const hostname = new URL(senderUrl).hostname;
+    return hostname === 'discord.com' || hostname.endsWith('.discord.com');
+  } catch {
+    return false;
+  }
+}
+
+function requireTrustedDiscordRenderer(event: Electron.IpcMainInvokeEvent) {
+  if (!isTrustedDiscordRenderer(event)) {
+    throw new Error('Update request rejected from an untrusted renderer.');
+  }
+}
+
+function setUnreadOverlay(count: number) {
+  if (!mainWindow || mainWindow.isDestroyed() || process.platform !== 'win32') return;
+  if (count <= 0) {
+    mainWindow.setOverlayIcon(null, 'No unread messages');
+    return;
+  }
+
+  const label = count > 99 ? '99+' : String(count);
+  const fontSize = label.length >= 3 ? 14 : label.length === 2 ? 17 : 20;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+    <circle cx="16" cy="16" r="15" fill="#f23f43" stroke="#ffffff" stroke-width="2"/>
+    <text x="16" y="22" text-anchor="middle" font-family="Segoe UI,Arial,sans-serif" font-size="${fontSize}" font-weight="700" fill="#ffffff">${label}</text>
+  </svg>`;
+  const overlay = nativeImage.createFromDataURL(
+    `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`
+  ).resize({ width: 16, height: 16 });
+  mainWindow.setOverlayIcon(overlay, `${count} unread messages`);
+}
+
+function armDiscordHealthWatchdog() {
+  clearDiscordHealthWatchdog();
+  discordHealthWatchdogTimer = setTimeout(() => {
+    discordHealthWatchdogTimer = null;
+    if (discordRendererReady || !mainWindow || mainWindow.isDestroyed() || isQuitting) return;
+
+    discordRecoveryAttempts += 1;
+    if (discordRecoveryAttempts === 1) {
+      appendLog('warn', 'Discord UI did not mount after 20 seconds; retrying the renderer.');
+      reloadDiscord('Discord UI health recovery');
+      return;
+    }
+
+    if (discordRecoveryAttempts === 2) {
+      sessionSafeMode = true;
+      appendLog('warn', 'Discord UI still did not mount; retrying without Vencord/Equicord.');
+      reloadDiscord('Discord UI recovery mode', true);
+      return;
+    }
+
+    appendLog('error', 'Discord UI did not mount after automatic recovery attempts.');
+    mainWindow.webContents.send('kawaicord:discordFailed');
+  }, 20_000);
+}
+
 function updateWindowPerformance() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
 
   const isBackground = !mainWindow.isVisible() || mainWindow.isMinimized();
-  const frameRate = config.performanceMode && isBackground ? 10 : 60;
-  if (appliedFrameRate !== frameRate) {
-    mainWindow.webContents.setFrameRate(frameRate);
-    appliedFrameRate = frameRate;
-  }
   if (appliedBackgroundThrottling !== config.backgroundThrottling) {
     mainWindow.webContents.setBackgroundThrottling(config.backgroundThrottling);
     appliedBackgroundThrottling = config.backgroundThrottling;
+  }
+  const rendererBackgrounded = config.performanceMode && isBackground;
+  if (appliedRendererBackgrounded !== rendererBackgrounded) {
+    mainWindow.webContents.send('window:backgroundedChanged', rendererBackgrounded);
+    appliedRendererBackgrounded = rendererBackgrounded;
   }
 }
 
@@ -92,6 +221,7 @@ type KawaicordConfig = {
   startAtLogin: boolean;
   minimizeToTray: boolean;
   autoUpdateMods: boolean;
+  autoUpdateApp: boolean;
 };
 
 function isValidMod(mod: unknown): mod is ValidMod {
@@ -116,10 +246,12 @@ const modBundleSources = {
   }
 } as const;
 
-function readFirstExisting(filePaths: string[]): string {
+async function readFirstExisting(filePaths: string[]): Promise<string> {
   for (const filePath of filePaths) {
-    if (fs.existsSync(filePath)) {
-      return fs.readFileSync(filePath, 'utf-8');
+    try {
+      return await fs.promises.readFile(filePath, 'utf-8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
   }
 
@@ -294,6 +426,15 @@ async function refreshModBundles() {
   }));
 }
 
+function scheduleModBundleRefresh(delayMs: number) {
+  if (modBundleRefreshTimer) clearTimeout(modBundleRefreshTimer);
+  modBundleRefreshTimer = setTimeout(() => {
+    modBundleRefreshTimer = null;
+    if (!isQuitting) void refreshModBundles();
+  }, delayMs);
+  modBundleRefreshTimer.unref();
+}
+
 // Default Config
 const defaultConfig = {
   activeMod: 'vencord' as ValidMod,
@@ -305,7 +446,8 @@ const defaultConfig = {
   trayIconTheme: 'dark' as 'dark' | 'light',
   startAtLogin: false,
   minimizeToTray: false,
-  autoUpdateMods: true
+  autoUpdateMods: true,
+  autoUpdateApp: true
 };
 
 function normalizeConfig(raw: unknown): KawaicordConfig {
@@ -323,7 +465,8 @@ function normalizeConfig(raw: unknown): KawaicordConfig {
     trayIconTheme: value.trayIconTheme === 'light' ? 'light' : 'dark',
     startAtLogin: booleanValue('startAtLogin'),
     minimizeToTray: booleanValue('minimizeToTray'),
-    autoUpdateMods: booleanValue('autoUpdateMods')
+    autoUpdateMods: booleanValue('autoUpdateMods'),
+    autoUpdateApp: booleanValue('autoUpdateApp')
   };
 }
 
@@ -340,6 +483,226 @@ if (fs.existsSync(configPath)) {
 }
 
 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+type AppUpdatePhase =
+  | 'disabled'
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'up-to-date'
+  | 'error';
+
+type AppUpdateStatus = {
+  phase: AppUpdatePhase;
+  currentVersion: string;
+  availableVersion?: string;
+  percent?: number;
+  transferred?: number;
+  total?: number;
+  message: string;
+  checkedAt?: number;
+};
+
+const AUTO_UPDATE_INITIAL_DELAY_MS = 30_000;
+const AUTO_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+let automaticUpdateTimer: NodeJS.Timeout | null = null;
+let updateCheckPromise: Promise<AppUpdateStatus> | null = null;
+let updaterConfigured = false;
+let appUpdateStatus: AppUpdateStatus = {
+  phase: 'idle',
+  currentVersion: app.getVersion(),
+  message: 'Ready to check for updates.'
+};
+
+function appUpdaterSupported() {
+  return process.platform === 'win32' && app.isPackaged;
+}
+
+function publishAppUpdateStatus(next: AppUpdateStatus) {
+  appUpdateStatus = next;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('kawaicord:updateStatus', appUpdateStatus);
+  }
+}
+
+function updateErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.replace(/\s+/g, ' ').trim().slice(0, 300) || 'Unknown update error';
+}
+
+function configureAppUpdater() {
+  if (updaterConfigured) return;
+  updaterConfigured = true;
+
+  if (!appUpdaterSupported()) {
+    publishAppUpdateStatus({
+      phase: 'disabled',
+      currentVersion: app.getVersion(),
+      message: 'App updates are available in installed builds.'
+    });
+    return;
+  }
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowPrerelease = false;
+  autoUpdater.disableWebInstaller = true;
+
+  autoUpdater.on('checking-for-update', () => {
+    publishAppUpdateStatus({
+      phase: 'checking',
+      currentVersion: app.getVersion(),
+      message: 'Checking GitHub Releases…'
+    });
+  });
+
+  autoUpdater.on('update-available', info => {
+    appendLog('info', `Kawaicord ${info.version} is available; downloading it in the background.`);
+    publishAppUpdateStatus({
+      phase: 'available',
+      currentVersion: app.getVersion(),
+      availableVersion: info.version,
+      message: `Kawaicord ${info.version} is available. Starting download…`,
+      checkedAt: Date.now()
+    });
+  });
+
+  autoUpdater.on('update-not-available', info => {
+    publishAppUpdateStatus({
+      phase: 'up-to-date',
+      currentVersion: app.getVersion(),
+      availableVersion: info.version,
+      message: 'Kawaicord is up to date.',
+      checkedAt: Date.now()
+    });
+  });
+
+  autoUpdater.on('download-progress', progress => {
+    publishAppUpdateStatus({
+      phase: 'downloading',
+      currentVersion: app.getVersion(),
+      availableVersion: appUpdateStatus.availableVersion,
+      percent: Math.max(0, Math.min(100, progress.percent)),
+      transferred: progress.transferred,
+      total: progress.total,
+      message: `Downloading Kawaicord ${appUpdateStatus.availableVersion ?? 'update'}…`
+    });
+  });
+
+  autoUpdater.on('update-downloaded', info => {
+    appendLog('info', `Kawaicord ${info.version} downloaded and ready to install.`);
+    publishAppUpdateStatus({
+      phase: 'downloaded',
+      currentVersion: app.getVersion(),
+      availableVersion: info.version,
+      percent: 100,
+      message: `Kawaicord ${info.version} is ready. Restart to install it.`,
+      checkedAt: Date.now()
+    });
+  });
+
+  autoUpdater.on('error', error => {
+    const message = updateErrorMessage(error);
+    appendLog('warn', 'App update failed.', error);
+    publishAppUpdateStatus({
+      phase: 'error',
+      currentVersion: app.getVersion(),
+      availableVersion: appUpdateStatus.availableVersion,
+      message: `Update failed: ${message}`,
+      checkedAt: Date.now()
+    });
+  });
+}
+
+async function checkForAppUpdates(): Promise<AppUpdateStatus> {
+  configureAppUpdater();
+  if (!appUpdaterSupported()) return appUpdateStatus;
+  if (updateCheckPromise) return updateCheckPromise;
+  if (appUpdateStatus.phase === 'downloaded') return appUpdateStatus;
+
+  updateCheckPromise = (async () => {
+    try {
+      await autoUpdater.checkForUpdates();
+    } catch (error) {
+      const message = updateErrorMessage(error);
+      appendLog('warn', 'Could not check GitHub Releases for an app update.', error);
+      publishAppUpdateStatus({
+        phase: 'error',
+        currentVersion: app.getVersion(),
+        message: `Could not check for updates: ${message}`,
+        checkedAt: Date.now()
+      });
+    }
+    return appUpdateStatus;
+  })();
+
+  try {
+    return await updateCheckPromise;
+  } finally {
+    updateCheckPromise = null;
+  }
+}
+
+function clearAutomaticUpdateTimer() {
+  if (!automaticUpdateTimer) return;
+  clearTimeout(automaticUpdateTimer);
+  automaticUpdateTimer = null;
+}
+
+function scheduleAutomaticUpdateCheck(delay = AUTO_UPDATE_INITIAL_DELAY_MS) {
+  clearAutomaticUpdateTimer();
+  if (!config.autoUpdateApp || !appUpdaterSupported() || isQuitting) return;
+
+  automaticUpdateTimer = setTimeout(() => {
+    automaticUpdateTimer = null;
+    void checkForAppUpdates().finally(() => {
+      scheduleAutomaticUpdateCheck(AUTO_UPDATE_INTERVAL_MS);
+    });
+  }, delay);
+  automaticUpdateTimer.unref();
+}
+
+async function installDownloadedAppUpdate() {
+  if (!appUpdaterSupported() || appUpdateStatus.phase !== 'downloaded' || restartInProgress) {
+    return false;
+  }
+
+  restartInProgress = true;
+  isQuitting = true;
+  clearAutomaticUpdateTimer();
+  stopRPC();
+  saveWindowState();
+
+  try {
+    await Promise.race([
+      session.fromPartition(discordPartition).flushStorageData(),
+      new Promise<never>((_resolve, reject) => {
+        setTimeout(() => reject(new Error('Storage flush timed out')), 2500);
+      })
+    ]);
+  } catch (error) {
+    appendLog('warn', 'Could not flush Discord storage before installing the update.', error);
+  }
+
+  try {
+    updateRecoveryState(true);
+    autoUpdater.quitAndInstall(false, true);
+    return true;
+  } catch (error) {
+    appendLog('error', 'Could not launch the downloaded update.', error);
+    restartInProgress = false;
+    isQuitting = false;
+    publishAppUpdateStatus({
+      ...appUpdateStatus,
+      phase: 'error',
+      message: `Could not install the update: ${updateErrorMessage(error)}`
+    });
+    scheduleAutomaticUpdateCheck(AUTO_UPDATE_INTERVAL_MS);
+    return false;
+  }
+}
 
 if (!fs.existsSync(vencordDataPath)) {
   fs.mkdirSync(vencordDataPath, { recursive: true });
@@ -365,21 +728,22 @@ async function setupVencordInjection() {
       ]
     }, (_details, callback) => callback({ cancel: true }));
 
-    ses.webRequest.onHeadersReceived((details, callback) => {
+    ses.webRequest.onHeadersReceived({
+      urls: [
+        'https://discord.com/app*',
+        'https://discord.com/channels/*',
+        'https://discord.com/login*',
+        'https://discord.com/register*'
+      ]
+    }, (details, callback) => {
       const headers = { ...details.responseHeaders };
 
-      // Only remove CSP from the main frame to improve performance
       if (details.resourceType === 'mainFrame') {
         Object.keys(headers).forEach(key => {
           if (key.toLowerCase().startsWith('content-security-policy')) {
             delete headers[key];
           }
         });
-      }
-
-      // Fix content-type for some resources if needed (like raw github)
-      if (details.resourceType === 'stylesheet') {
-        headers['content-type'] = ['text/css'];
       }
 
       callback({ responseHeaders: headers });
@@ -391,21 +755,24 @@ async function setupVencordInjection() {
 }
 
 let rpcChild: Electron.UtilityProcess | null = null;
+let rpcRestartTimer: ReturnType<typeof setTimeout> | undefined;
 let processList: any[] = [];
 
 function startRPC(window: BrowserWindow) {
     if (!config.arRPC) return;
     stopRPC();
 
-    rpcChild = utilityProcess.fork(path.join(__dirname, "rpc.js"), undefined, {
+    const child = utilityProcess.fork(path.join(__dirname, "rpc.js"), undefined, {
         env: { detectables: JSON.stringify(getDetectables()) },
     });
 
-    rpcChild.on("spawn", () => {
+    child.on("spawn", () => {
         console.log("[arRPC] process started");
     });
+    rpcChild = child;
 
     rpcChild.on("message", (message) => {
+        if (rpcChild !== child) return;
         try {
           const json = JSON.parse(String(message));
           if (json.type === "invite") {
@@ -421,51 +788,92 @@ function startRPC(window: BrowserWindow) {
     });
 
     rpcChild.on("exit", (code) => {
+        if (rpcChild !== child) return;
         console.log("[arRPC] process exited");
         rpcChild = null;
         if (!isQuitting && config.arRPC && code !== 0 && mainWindow) {
-          setTimeout(() => {
-            if (mainWindow && !mainWindow.isDestroyed()) startRPC(mainWindow);
+          rpcRestartTimer = setTimeout(() => {
+            rpcRestartTimer = undefined;
+            if (!isQuitting && config.arRPC && !rpcChild && mainWindow && !mainWindow.isDestroyed()) startRPC(mainWindow);
           }, 3000);
         }
     });
 }
 
 function stopRPC() {
+    clearTimeout(rpcRestartTimer);
+    rpcRestartTimer = undefined;
     if (rpcChild) {
-        rpcChild.kill();
+        const child = rpcChild;
         rpcChild = null;
+        child.kill();
     }
 }
 
 async function shutdownForRestart() {
+  if (appUpdateStatus.phase === 'downloaded') {
+    await installDownloadedAppUpdate();
+    return;
+  }
   if (restartInProgress) return;
   restartInProgress = true;
   isQuitting = true;
   appendLog('info', 'Restart requested.');
 
   stopRPC();
-  tray?.destroy();
-  tray = null;
-
-  try {
-    await session.fromPartition(discordPartition).flushStorageData();
-  } catch (error) {
-    appendLog('warn', 'Could not flush Discord storage before restart.', error);
+  clearInjectionWatchdog();
+  clearDiscordHealthWatchdog();
+  if (rendererRecoveryTimer) {
+    clearTimeout(rendererRecoveryTimer);
+    rendererRecoveryTimer = null;
   }
 
-  updateRecoveryState(true);
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.removeAllListeners('close');
-    mainWindow.destroy();
-    mainWindow = null;
+  try {
+    await Promise.race([
+      session.fromPartition(discordPartition).flushStorageData(),
+      new Promise<never>((_resolve, reject) => {
+        setTimeout(() => reject(new Error('Storage flush timed out')), 2500);
+      })
+    ]);
+  } catch (error) {
+    appendLog('warn', 'Could not flush Discord storage before restart.', error);
   }
 
   const relaunchArgs = process.argv
     .slice(1)
     .filter(arg => arg !== '--safe-mode' && arg !== '--restart-smoke-test');
   if (restartSmokeTestMode) relaunchArgs.push('--smoke-test');
-  app.relaunch({ args: relaunchArgs });
+
+  try {
+    app.relaunch({ args: relaunchArgs });
+  } catch (error) {
+    appendLog('error', 'Could not schedule the replacement process.', error);
+    isQuitting = false;
+    restartInProgress = false;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (config.arRPC) startRPC(mainWindow);
+      requestRendererInjection('restart recovery');
+      void dialog.showMessageBox(mainWindow, {
+        type: 'error',
+        title: 'Kawaicord could not restart',
+        message: 'The replacement process could not be started.',
+        detail: `Kawaicord is still running. Try again or quit it manually.\n\nLog: ${logPath}`,
+        buttons: ['OK'],
+        noLink: true
+      });
+    }
+    return;
+  }
+
+  saveWindowState();
+  updateRecoveryState(true);
+  tray?.destroy();
+  tray = null;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.removeAllListeners('close');
+    mainWindow.destroy();
+    mainWindow = null;
+  }
   app.exit(0);
 }
 
@@ -577,8 +985,11 @@ function createTray() {
 
 function createWindow() {
   console.log('Creating window...');
-  appliedFrameRate = null;
   appliedBackgroundThrottling = null;
+  appliedRendererBackgrounded = null;
+  discordRendererReady = false;
+  discordRecoveryAttempts = 0;
+  clearDiscordHealthWatchdog();
   const appIconPath = path.join(__dirname, '..', 'icons', 'icon.png');
   const restoredState = restoreWindowState(
     readStoredWindowState(),
@@ -611,7 +1022,10 @@ function createWindow() {
     autoHideMenuBar: true
   });
 
-  mainWindow.loadURL('https://discord.com/app');
+  void mainWindow.loadURL('https://discord.com/app').catch(error => {
+    if (isQuitting || restartInProgress) return;
+    appendLog('error', 'Could not begin loading Discord.', error);
+  });
 
   startRPC(mainWindow);
   createTray();
@@ -622,18 +1036,56 @@ function createWindow() {
 
   if (restoredState.maximized) mainWindow.maximize();
 
+  const sendWindowState = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send('window:stateChanged', {
+      maximized: mainWindow.isMaximized(),
+      focused: mainWindow.isFocused(),
+      backgrounded: config.performanceMode && (!mainWindow.isVisible() || mainWindow.isMinimized())
+    });
+  };
+
   mainWindow.on('show', updateWindowPerformance);
   mainWindow.on('hide', updateWindowPerformance);
   mainWindow.on('minimize', updateWindowPerformance);
   mainWindow.on('restore', updateWindowPerformance);
+  mainWindow.on('focus', sendWindowState);
+  mainWindow.on('blur', sendWindowState);
   mainWindow.on('move', queueWindowStateSave);
   mainWindow.on('resize', queueWindowStateSave);
-  mainWindow.on('maximize', queueWindowStateSave);
-  mainWindow.on('unmaximize', queueWindowStateSave);
+  mainWindow.on('maximize', () => {
+    queueWindowStateSave();
+    sendWindowState();
+  });
+  mainWindow.on('unmaximize', () => {
+    queueWindowStateSave();
+    sendWindowState();
+  });
+
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    const reloadRequest = getRendererReloadRequest(input);
+    if (!reloadRequest) return;
+
+    event.preventDefault();
+    reloadDiscord(reloadRequest.reason, reloadRequest.ignoreCache);
+  });
+
+  mainWindow.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) markRendererNavigation();
+  });
+
+  mainWindow.webContents.on('did-finish-load', () => {
+    requestRendererInjection('page finished loading');
+    armDiscordHealthWatchdog();
+    sendWindowState();
+    sendNavigationState();
+  });
 
   mainWindow.webContents.on('did-navigate', (event, url) => {
     console.log('Navigated to:', url);
+    sendNavigationState();
   });
+  mainWindow.webContents.on('did-navigate-in-page', sendNavigationState);
 
   mainWindow.webContents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
     if (!isMainFrame || code === -3) return;
@@ -642,6 +1094,13 @@ function createWindow() {
 
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     if (isQuitting) return;
+    if (details.reason === 'clean-exit') return;
+
+    const now = Date.now();
+    if (now - rendererCrashWindowStartedAt > 60_000) {
+      rendererCrashWindowStartedAt = now;
+      rendererCrashCount = 0;
+    }
     rendererCrashCount += 1;
     appendLog('error', `Renderer exited: ${details.reason} (${details.exitCode}).`);
 
@@ -650,36 +1109,44 @@ function createWindow() {
       appendLog('warn', 'Repeated renderer failure; recovering without Vencord/Equicord for this session.');
     }
 
-    setTimeout(() => {
+    if (rendererRecoveryTimer) clearTimeout(rendererRecoveryTimer);
+    rendererRecoveryTimer = setTimeout(() => {
+      rendererRecoveryTimer = null;
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.reloadIgnoringCache();
+        reloadDiscord('renderer recovery', true);
       }
-    }, 750);
+    }, 1000);
   });
 
   mainWindow.on('unresponsive', async () => {
+    if (unresponsiveDialogOpen) return;
     appendLog('warn', 'Renderer became unresponsive.');
     if (!mainWindow || mainWindow.isDestroyed() || isQuitting) return;
-    const result = await dialog.showMessageBox(mainWindow, {
-      type: 'warning',
-      title: 'Kawaicord is not responding',
-      message: 'Discord stopped responding.',
-      detail: 'You can wait, reload the Discord view, or restart Kawaicord in recovery mode.',
-      buttons: ['Wait', 'Reload', 'Recovery restart'],
-      defaultId: 0,
-      cancelId: 0,
-      noLink: true
-    });
+    unresponsiveDialogOpen = true;
+    try {
+      const result = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        title: 'Kawaicord is not responding',
+        message: 'Discord stopped responding.',
+        detail: 'You can wait, reload the Discord view, or restart Kawaicord in recovery mode.',
+        buttons: ['Wait', 'Reload', 'Recovery restart'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true
+      });
 
-    if (result.response === 1) {
-      mainWindow?.webContents.reloadIgnoringCache();
-    } else if (result.response === 2) {
-      sessionSafeMode = true;
-      app.relaunch({ args: [...process.argv.slice(1).filter(arg => arg !== '--safe-mode'), '--safe-mode'] });
-      isQuitting = true;
-      stopRPC();
-      updateRecoveryState(true);
-      app.exit(0);
+      if (result.response === 1) {
+        reloadDiscord('unresponsive recovery', true);
+      } else if (result.response === 2) {
+        sessionSafeMode = true;
+        app.relaunch({ args: [...process.argv.slice(1).filter(arg => arg !== '--safe-mode'), '--safe-mode'] });
+        isQuitting = true;
+        stopRPC();
+        updateRecoveryState(true);
+        app.exit(0);
+      }
+    } finally {
+      unresponsiveDialogOpen = false;
     }
   });
 
@@ -718,6 +1185,12 @@ function createWindow() {
       clearTimeout(windowStateSaveTimer);
       windowStateSaveTimer = null;
     }
+    clearInjectionWatchdog();
+    clearDiscordHealthWatchdog();
+    if (rendererRecoveryTimer) {
+      clearTimeout(rendererRecoveryTimer);
+      rendererRecoveryTimer = null;
+    }
     mainWindow = null;
   });
 
@@ -725,10 +1198,25 @@ function createWindow() {
 }
 
 ipcMain.handle('kawaicord:getVersion', () => app.getVersion());
-ipcMain.handle('kawaicord:reload', () => mainWindow?.reload());
+ipcMain.handle('kawaicord:reload', () => {
+  reloadDiscord('Kawaicord API');
+  return true;
+});
 ipcMain.handle('kawaicord:restart', () => {
   void shutdownForRestart();
   return true;
+});
+ipcMain.handle('kawaicord:getUpdateStatus', event => {
+  requireTrustedDiscordRenderer(event);
+  return appUpdateStatus;
+});
+ipcMain.handle('kawaicord:checkForUpdates', event => {
+  requireTrustedDiscordRenderer(event);
+  return checkForAppUpdates();
+});
+ipcMain.handle('kawaicord:installUpdate', event => {
+  requireTrustedDiscordRenderer(event);
+  return installDownloadedAppUpdate();
 });
 ipcMain.on('kawaicord:setTrayIcon', (event, theme) => updateTrayIcon(theme));
 ipcMain.on('kawaicord:toggleTray', (event, enabled) => {
@@ -745,17 +1233,18 @@ ipcMain.on('kawaicord:getOsRelease', (event) => event.returnValue = require('os'
 ipcMain.on('kawaicord:getOsArch', (event) => event.returnValue = require('os').arch());
 ipcMain.handle('vencord:getDataPath', () => vencordDataPath);
 
-ipcMain.handle('kawaicord:getShelterBundle', () => {
+ipcMain.handle('kawaicord:getShelterBundle', async () => {
   const userDataJsPath = path.join(app.getPath('userData'), 'shelter.js');
   const bundledJsPath = path.join(__dirname, '..', 'shelter', 'shelter.js');
 
   return {
     enabled: true,
-    js: readFirstExisting([userDataJsPath, bundledJsPath])
+    js: await readFirstExisting([userDataJsPath, bundledJsPath])
   };
 });
 
-function getModBundle(mod: 'vencord' | 'equicord', enabled: boolean) {
+async function getModBundle(mod: 'vencord' | 'equicord', enabled: boolean) {
+  if (!enabled || sessionSafeMode) return { enabled: false, mod, js: '', css: '' };
   const userDataJsPath = path.join(app.getPath('userData'), `${mod}.js`);
   const userDataCssPath = path.join(app.getPath('userData'), `${mod}.css`);
   const bundledJsPath = path.join(__dirname, '..', mod, `${mod}.js`);
@@ -764,8 +1253,8 @@ function getModBundle(mod: 'vencord' | 'equicord', enabled: boolean) {
   return {
     enabled: enabled && !sessionSafeMode,
     mod,
-    js: readFirstExisting([userDataJsPath, bundledJsPath]),
-    css: readFirstExisting([userDataCssPath, bundledCssPath])
+    js: await readFirstExisting([userDataJsPath, bundledJsPath]),
+    css: await readFirstExisting([userDataCssPath, bundledCssPath])
   };
 }
 
@@ -787,10 +1276,18 @@ ipcMain.on('kawaicord:injectionStatus', (_event, status: {
   shelter?: boolean;
   mod?: string | null;
   restartHooks?: number;
+  attempts?: number;
+  reason?: string;
   error?: string | null;
 }) => {
+  const injectionSucceeded = Boolean(status.shelter && (sessionSafeMode || status.mod) && !status.error);
+  if (injectionSucceeded) {
+    rendererInjectionReady = true;
+    clearInjectionWatchdog();
+  }
+
   if (status.error) {
-    appendLog('error', `Renderer injection failed: ${status.error}`);
+    appendLog('error', `Renderer injection attempt ${status.attempts ?? 1} failed: ${status.error}`);
   } else {
     const restartDetail = status.mod
       ? ` (${status.restartHooks ?? 0} restart calls routed)`
@@ -801,14 +1298,24 @@ ipcMain.on('kawaicord:injectionStatus', (_event, status: {
     }
   }
 
-  if (smokeTestMode) {
+  if (smokeTestMode && injectionSucceeded) {
     setTimeout(() => {
       isQuitting = true;
       app.quit();
     }, 500);
-  } else if (restartSmokeTestMode) {
+  } else if (restartSmokeTestMode && injectionSucceeded) {
     setTimeout(() => void shutdownForRestart(), 500);
   }
+});
+
+ipcMain.on('kawaicord:discordReady', () => {
+  if (discordRendererReady) return;
+  discordRendererReady = true;
+  discordRecoveryAttempts = 0;
+  clearDiscordHealthWatchdog();
+  appendLog('info', 'Discord UI ready.');
+  // Let Discord finish its first paint before doing optional CDN work.
+  scheduleModBundleRefresh(5_000);
 });
 
 ipcMain.handle('kawaicord:getConfig', () => config);
@@ -820,7 +1327,7 @@ ipcMain.handle('kawaicord:setConfig', (_event, newConfig) => {
   const booleanKeys: Array<keyof Pick<
     KawaicordConfig,
     'performanceMode' | 'backgroundThrottling' | 'arRPC' | 'trayEnabled' |
-    'trayIconAuto' | 'startAtLogin' | 'minimizeToTray' | 'autoUpdateMods'
+    'trayIconAuto' | 'startAtLogin' | 'minimizeToTray' | 'autoUpdateMods' | 'autoUpdateApp'
   >> = [
     'performanceMode',
     'backgroundThrottling',
@@ -829,7 +1336,8 @@ ipcMain.handle('kawaicord:setConfig', (_event, newConfig) => {
     'trayIconAuto',
     'startAtLogin',
     'minimizeToTray',
-    'autoUpdateMods'
+    'autoUpdateMods',
+    'autoUpdateApp'
   ];
   const nextConfig = { ...config };
 
@@ -867,6 +1375,14 @@ ipcMain.handle('kawaicord:setConfig', (_event, newConfig) => {
     updateWindowPerformance();
   }
 
+  if (oldConfig.autoUpdateApp !== config.autoUpdateApp) {
+    if (config.autoUpdateApp) {
+      scheduleAutomaticUpdateCheck(5_000);
+    } else {
+      clearAutomaticUpdateTimer();
+    }
+  }
+
   return true;
 });
 
@@ -886,7 +1402,27 @@ ipcMain.on('window:maximize', () => {
   }
 });
 ipcMain.on('window:close', () => mainWindow?.close());
+ipcMain.on('window:setUnreadCount', (_event, value) => {
+  const count = Number.isFinite(value) ? Math.max(0, Math.min(9999, Math.floor(value))) : 0;
+  setUnreadOverlay(count);
+});
+ipcMain.on('window:navigateBack', () => {
+  const history = mainWindow?.webContents.navigationHistory;
+  if (history?.canGoBack()) history.goBack();
+});
+ipcMain.on('window:navigateForward', () => {
+  const history = mainWindow?.webContents.navigationHistory;
+  if (history?.canGoForward()) history.goForward();
+});
+ipcMain.handle('window:getNavigationState', getNavigationState);
 ipcMain.handle('window:isMaximized', () => mainWindow?.isMaximized());
+ipcMain.handle('window:getState', () => ({
+  maximized: Boolean(mainWindow?.isMaximized()),
+  focused: Boolean(mainWindow?.isFocused()),
+  backgrounded: Boolean(
+    config.performanceMode && mainWindow && (!mainWindow.isVisible() || mainWindow.isMinimized())
+  )
+}));
 ipcMain.on('window:setBackgroundColor', (_event, color) => {
   if (typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color)) {
     mainWindow?.setBackgroundColor(color);
@@ -910,8 +1446,6 @@ ipcMain.on('kawaicord:rpc:getDetectables', (event) => {
     event.returnValue = getDetectables();
 });
 
-
-app.commandLine.appendSwitch('disable-gpu-process-crash-limit');
 
 crashReporter.start({
   productName: 'Kawaicord',
@@ -940,9 +1474,13 @@ if (!hasSingleInstanceLock) {
     console.log('App ready.');
     appendLog('info', `Starting Kawaicord ${app.getVersion()}${sessionSafeMode ? ' in recovery mode' : ''}.`);
     setupKawaicordProtocol();
-    await refreshModBundles();
     await setupVencordInjection();
     createWindow();
+    configureAppUpdater();
+    scheduleAutomaticUpdateCheck();
+    // Bundled/cached mods make startup deterministic. This fallback refresh is
+    // rescheduled sooner once Discord reports that its UI has mounted.
+    scheduleModBundleRefresh(30_000);
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -960,6 +1498,17 @@ if (!hasSingleInstanceLock) {
 app.on('before-quit', () => {
   isQuitting = true;
   stopRPC();
+  clearInjectionWatchdog();
+  clearDiscordHealthWatchdog();
+  clearAutomaticUpdateTimer();
+  if (modBundleRefreshTimer) {
+    clearTimeout(modBundleRefreshTimer);
+    modBundleRefreshTimer = null;
+  }
+  if (rendererRecoveryTimer) {
+    clearTimeout(rendererRecoveryTimer);
+    rendererRecoveryTimer = null;
+  }
   if (hasSingleInstanceLock) updateRecoveryState(true);
 });
 

@@ -8,7 +8,7 @@ export type PatchedClientModBundle = {
 // Browser builds use page reloads for their restart buttons. In Kawaicord that
 // tears down only the renderer, so route those calls through the full app
 // restart bridge exposed by preload instead.
-const clientModRestartCall = /(^|[^\w$.])(?:window\s*\.\s*)?location\s*\.\s*reload\s*\(\s*\)/gm;
+const clientModRestartCall = /(^|[^\w$.])(?:(?:window|globalThis|document)\s*\.\s*)?location\s*\.\s*reload\s*\(\s*(?:true|false)?\s*\)/gm;
 
 export function routeClientModRestarts(source: string): PatchedClientModBundle {
   let restartHooks = 0;

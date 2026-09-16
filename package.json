@@ -1,6 +1,6 @@
 {
   "name": "kawaicord",
-  "version": "1.1.4",
+  "version": "1.4.0",
   "description": "A polished Discord web client with Shelter and switchable Vencord or Equicord support",
   "main": "dist/main.js",
   "scripts": {
@@ -11,6 +11,7 @@
     "watch": "tsc -w",
     "postinstall": "install-electron",
     "package": "npm run build && electron-builder --win nsis --publish never",
+    "release": "npm run test && electron-builder --win nsis --publish always",
     "package:dir": "npm run build && electron-builder --dir"
   },
   "author": "Kawaicord contributors",
@@ -19,11 +20,12 @@
     "node": ">=22.12"
   },
   "dependencies": {
-    "arrpc": "^3.6.0"
+    "arrpc": "^3.6.0",
+    "electron-updater": "6.8.9"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
-    "electron": "^43.4.0",
+    "electron": "^44.1.0",
     "electron-builder": "^26.15.3",
     "typescript": "^5.9.3"
   },
@@ -37,6 +39,14 @@
     "directories": {
       "output": "build"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "evenafterallisaid",
+        "repo": "kawaicord",
+        "releaseType": "release"
+      }
+    ],
     "files": [
       "dist/**/*",
       "icons/**/*",
