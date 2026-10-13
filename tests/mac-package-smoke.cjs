@@ -41,6 +41,7 @@ app.whenReady().then(async () => {
     await new Promise((resolve, reject) => { original.once('spawn', resolve); original.once('error', reject); });
     updater.prepared.parentPid = original.pid;
     updater.prepared.args = [`--user-data-dir=${profile}`, '--smoke-test'];
+    for (const marker of ['ready', 'cancel', 'ack']) await fs.writeFile(path.join(updater.prepared.workDir, marker), 'stale attempt');
     await updater.prepareInstall();
     original.kill();
     let receipt;
