@@ -59,9 +59,11 @@ app.whenReady().then(async () => {
     assert.match(await fs.readFile(path.join(profile, 'kawaicord.log'), 'utf8'), /Renderer injection ready: Shelter \+ equicord/);
     assert.equal(JSON.parse(await fs.readFile(path.join(profile, 'kawaicord_config.json'))).activeMod, 'equicord');
     console.log('Universal app update: native ZIP verification, app replacement, relaunch, Equicord injection and settings preservation passed');
+    for (let i = 0; i < 150 && updater.installationHelper.exitCode === null; i++) await wait(100);
+    assert.equal(updater.installationHelper.exitCode, 0);
     await wait(1000); // Let the smoke-test app finish its controlled exit.
     app.getPath = getPath;
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
     app.exit(0);
   } catch (error) {
     console.error(error);
