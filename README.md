@@ -4,7 +4,7 @@
   <img src="icons/icon.png" alt="Kawaicord mascot" width="144">
 </p>
 
-Kawaicord is a Windows desktop wrapper for Discord's web app with Discord-native window controls, always-on Shelter support, and one-click switching between Vencord and Equicord.
+Kawaicord is a Windows and macOS desktop wrapper for Discord's web app with protected window controls, always-on Shelter support, and one-click switching between Vencord and Equicord.
 
 > [!IMPORTANT]
 > Kawaicord is an independent, unofficial project. It is not affiliated with or endorsed by Discord Inc., Vencord, Equicord, or Shelter. Client modifications may violate Discord's Terms of Service; use them at your own risk.
@@ -20,6 +20,7 @@ Kawaicord is a Windows desktop wrapper for Discord's web app with Discord-native
 - Ctrl+R, Ctrl+Shift+R, and F5 use a controlled renderer refresh that shows a protected loading surface and verifies Shelter plus the selected client mod after every navigation.
 - Discord's back/forward controls and a theme-proof drag region remain available in the shared app bar.
 - Windows receives Discord's unread count as a taskbar overlay badge.
+- macOS receives unread badges in the Dock, a native application menu, and a menu-bar tray icon.
 - Recovery mode keeps Shelter available while pausing a repeatedly crashing client mod.
 - A UI health watchdog verifies that Discord actually mounted, retries one normal reload, then recovers without the selected client mod instead of leaving a blank window.
 - The Windows controls live inside Discord's own platform-aware app bar, use crisp stock-style caption glyphs, follow its live theme tokens (including pure-black AMOLED themes), and reserve their space plus a small safety gap without covering navigation or toolbar actions.
@@ -36,15 +37,21 @@ Kawaicord is a Windows desktop wrapper for Discord's web app with Discord-native
 
 Download `Kawaicord-Setup-<version>-x64.exe` from the latest GitHub release and run the installer. The assisted installer can create Start menu and desktop shortcuts and lets you choose the installation directory.
 
+On macOS 12 or newer, download `Kawaicord-<version>-mac-universal.dmg`, open it, and drag Kawaicord to Applications. The universal app runs on both Apple Silicon and Intel Macs. Shelter, the selected client mod, settings, recovery, and background performance mode are included on both platforms. macOS will request microphone, camera, and screen-recording access when those features are used.
+
+Current Mac releases are ad-hoc signed, not Apple Developer ID signed or notarized. Gatekeeper may require approval for the first launch through System Settings → Privacy & Security. This approval is separate from installing or updating the app; the updater does not disable Gatekeeper.
+
 Kawaicord downloads Shelter plus the selected Vencord/Equicord browser bundle when an update is due. If the update service is unavailable, it uses the last known-good cached copy or the bundled fallback.
 
 Mod refreshes happen after the window is created, so a slow mod CDN cannot hold up Discord startup. The cached or installer-bundled copy is used for the current launch and a newly downloaded copy is ready for the next controlled refresh or restart.
 
 ## App updates
 
-Open Discord's settings and select **Kawaicord → Updates** to check manually or enable automatic app updates. Installed builds read integrity-checked update metadata from this repository's GitHub Releases. Downloads happen in the background and show progress in settings; Kawaicord installs a ready update when you choose **Restart and update** or exit normally.
+Open Discord's settings and select **Kawaicord → Updates** to check manually or enable automatic app updates. Installed builds read update metadata from this repository's GitHub Releases. Downloads happen in the background with SHA-512 verification and progress in settings. Choose **Restart and update** when ready. A download never interrupts a call, and merely closing to the tray or quitting does not automatically apply it.
 
-The NSIS updater replaces application files only. Kawaicord configuration, Discord session storage, client-mod settings, and cached bundles stay in `%APPDATA%\kawaicord`, and the uninstaller continues to preserve that profile by default.
+On Windows, Kawaicord applies the verified NSIS payload silently and relaunches, without opening the installation wizard. On macOS, its native main-process updater downloads the ZIP, checks the app identity, version, architecture, and code-signature integrity, and stages it beside the installed app. A detached helper waits for the old process to quit, replaces the app using filesystem renames, and relaunches it. If the replacement exits or fails to confirm startup within a minute, the helper restores and relaunches the previous app. A Developer ID signed installation additionally requires the update to use the same Team ID.
+
+Updates replace application files only. Configuration, Discord sessions, client-mod settings, and cached bundles remain in `%APPDATA%\kawaicord` on Windows or `~/Library/Application Support/kawaicord` on macOS. Mac updates require an installed, writable app location; the updater cannot replace an app running from its read-only DMG or a translocated location. Managed installations with restricted permissions must be updated by their administrator.
 
 Kawaicord remains an independent client and does not forge official-client identity or quest progress. Features that Discord permits in its web client work normally, while arRPC supplies legitimate local Rich Presence information for supported games and applications.
 
@@ -75,7 +82,7 @@ User settings, cached mod bundles, and Discord session data remain under `%APPDA
 
 Requirements:
 
-- Windows 10 or newer
+- Windows 10 or newer, or macOS 12 or newer
 - Node.js 22.12 or newer
 - npm
 
@@ -95,7 +102,16 @@ npm run package
 
 The NSIS installer is written to `build/`. For an unpacked smoke-test build, use `npm run package:dir`.
 
-Tagged releases use `.github/workflows/release.yml`. A tag such as `v1.3.0` builds the NSIS installer and publishes it together with `latest.yml` and block-map metadata required by the updater.
+Build the universal macOS DMG and ZIP on a Mac:
+
+```sh
+npm ci
+npm run package:mac
+```
+
+The DMG is the first-install package; the ZIP is the in-app updater payload. Windows cannot build a real DMG, so GitHub Actions uses a macOS runner for these artifacts. Both architectures are packaged into one universal app.
+
+Tagged releases use `.github/workflows/release.yml`. A tag such as `v1.5.0` builds Windows and macOS packages, tests native Mac update/rollback, verifies the DMG and app signature, and publishes only after both builds succeed. The release includes the EXE, DMG, ZIP, `latest.yml`, `latest-mac.yml`, and matching block maps.
 
 ## Project layout
 
@@ -119,7 +135,7 @@ npm audit --omit=dev
 npm run package
 ```
 
-GitHub Actions runs the same compile and Windows packaging flow and uploads the installer as a workflow artifact. Version tags additionally publish a GitHub Release with the updater metadata.
+GitHub Actions runs tests and packaging on Windows and macOS and uploads both installers as workflow artifacts. Version tags additionally publish a complete GitHub Release with the updater metadata.
 
 ## License and credits
 

@@ -17,7 +17,8 @@ import {
 import * as path from 'path';
 import * as fs from 'fs';
 import { pathToFileURL } from 'url';
-import { autoUpdater } from 'electron-updater';
+import { NsisUpdater, AppUpdater } from 'electron-updater';
+import { MacZipUpdater, acknowledgeMacUpdate, macAppBundle } from './mac-updater';
 import { getDetectables, addDetectable } from './detectables';
 import { getRendererReloadRequest } from './reload';
 import { restoreWindowState, StoredWindowState } from './window-state';
@@ -151,6 +152,10 @@ function requireTrustedDiscordRenderer(event: Electron.IpcMainInvokeEvent) {
 }
 
 function setUnreadOverlay(count: number) {
+  if (process.platform === 'darwin') {
+    app.dock?.setBadge(count > 0 ? (count > 99 ? '99+' : String(count)) : '');
+    return;
+  }
   if (!mainWindow || mainWindow.isDestroyed() || process.platform !== 'win32') return;
   if (count <= 0) {
     mainWindow.setOverlayIcon(null, 'No unread messages');
@@ -491,6 +496,7 @@ type AppUpdatePhase =
   | 'available'
   | 'downloading'
   | 'downloaded'
+  | 'installing'
   | 'up-to-date'
   | 'error';
 
@@ -510,6 +516,7 @@ const AUTO_UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 let automaticUpdateTimer: NodeJS.Timeout | null = null;
 let updateCheckPromise: Promise<AppUpdateStatus> | null = null;
 let updaterConfigured = false;
+let autoUpdater: AppUpdater;
 let appUpdateStatus: AppUpdateStatus = {
   phase: 'idle',
   currentVersion: app.getVersion(),
@@ -517,7 +524,12 @@ let appUpdateStatus: AppUpdateStatus = {
 };
 
 function appUpdaterSupported() {
-  return process.platform === 'win32' && app.isPackaged;
+  if (!app.isPackaged) return false;
+  if (process.platform === 'darwin') {
+    try { macAppBundle(app.getPath('exe')); return true; }
+    catch { return false; }
+  }
+  return process.platform === 'win32';
 }
 
 function publishAppUpdateStatus(next: AppUpdateStatus) {
@@ -540,15 +552,24 @@ function configureAppUpdater() {
     publishAppUpdateStatus({
       phase: 'disabled',
       currentVersion: app.getVersion(),
-      message: 'App updates are available in installed builds.'
+      message: process.platform === 'darwin' && app.isPackaged
+        ? 'Move Kawaicord to Applications before updating.'
+        : 'App updates are available in installed builds.'
     });
     return;
   }
 
+  autoUpdater = process.platform === 'darwin' ? new MacZipUpdater() : new NsisUpdater();
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowPrerelease = false;
   autoUpdater.disableWebInstaller = true;
+  autoUpdater.allowDowngrade = false;
+  autoUpdater.logger = {
+    info: message => appendLog('info', String(message)),
+    warn: message => appendLog('warn', String(message)),
+    error: message => appendLog('error', String(message))
+  };
 
   autoUpdater.on('checking-for-update', () => {
     publishAppUpdateStatus({
@@ -606,6 +627,13 @@ function configureAppUpdater() {
   autoUpdater.on('error', error => {
     const message = updateErrorMessage(error);
     appendLog('warn', 'App update failed.', error);
+    if (appUpdateStatus.phase === 'installing') {
+      restartInProgress = false;
+      isQuitting = false;
+      updateRecoveryState(false);
+      if (mainWindow && !mainWindow.isDestroyed()) startRPC(mainWindow);
+      scheduleAutomaticUpdateCheck(AUTO_UPDATE_INTERVAL_MS);
+    }
     publishAppUpdateStatus({
       phase: 'error',
       currentVersion: app.getVersion(),
@@ -620,7 +648,7 @@ async function checkForAppUpdates(): Promise<AppUpdateStatus> {
   configureAppUpdater();
   if (!appUpdaterSupported()) return appUpdateStatus;
   if (updateCheckPromise) return updateCheckPromise;
-  if (appUpdateStatus.phase === 'downloaded') return appUpdateStatus;
+  if (['available', 'downloading', 'downloaded', 'installing'].includes(appUpdateStatus.phase)) return appUpdateStatus;
 
   updateCheckPromise = (async () => {
     try {
@@ -670,6 +698,15 @@ async function installDownloadedAppUpdate() {
   }
 
   restartInProgress = true;
+  publishAppUpdateStatus({ ...appUpdateStatus, phase: 'installing', message: 'Applying update and restarting…' });
+  // Verify the helper is alive before shutting down a usable client.
+  try {
+    if (autoUpdater instanceof MacZipUpdater) await autoUpdater.prepareInstall();
+  } catch (error) {
+    restartInProgress = false;
+    publishAppUpdateStatus({ ...appUpdateStatus, phase: 'downloaded', message: `Update could not start: ${updateErrorMessage(error)}` });
+    return false;
+  }
   isQuitting = true;
   clearAutomaticUpdateTimer();
   stopRPC();
@@ -688,12 +725,13 @@ async function installDownloadedAppUpdate() {
 
   try {
     updateRecoveryState(true);
-    autoUpdater.quitAndInstall(false, true);
+    autoUpdater.quitAndInstall(true, true);
     return true;
   } catch (error) {
     appendLog('error', 'Could not launch the downloaded update.', error);
     restartInProgress = false;
     isQuitting = false;
+    if (mainWindow && !mainWindow.isDestroyed()) startRPC(mainWindow);
     publishAppUpdateStatus({
       ...appUpdateStatus,
       phase: 'error',
@@ -841,7 +879,7 @@ async function shutdownForRestart() {
 
   const relaunchArgs = process.argv
     .slice(1)
-    .filter(arg => arg !== '--safe-mode' && arg !== '--restart-smoke-test');
+    .filter(arg => arg !== '--safe-mode' && arg !== '--restart-smoke-test' && !arg.startsWith('--kawaicord-update-id='));
   if (restartSmokeTestMode) relaunchArgs.push('--smoke-test');
 
   try {
@@ -961,6 +999,7 @@ function updateTrayIcon(theme: string) {
     const iconPath = getTrayIconPath(theme);
     if (fs.existsSync(iconPath)) {
         const icon = nativeImage.createFromPath(iconPath).resize({ height: 16 });
+        if (process.platform === 'darwin') icon.setTemplateImage(true);
         tray.setImage(icon);
         tray.setContextMenu(buildTrayContextMenu(icon));
     }
@@ -976,6 +1015,7 @@ function createTray() {
     const trayIcon = nativeImage
       .createFromPath(fs.existsSync(iconPath) ? iconPath : fallbackIconPath)
       .resize({ width: 16, height: 16 });
+    if (process.platform === 'darwin') trayIcon.setTemplateImage(true);
 
     tray = new Tray(trayIcon);
     tray.setContextMenu(buildTrayContextMenu(trayIcon));
@@ -1023,6 +1063,7 @@ function createWindow() {
     titleBarOverlay: false,
     autoHideMenuBar: true
   });
+  if (process.platform === 'darwin') mainWindow.setWindowButtonVisibility(false);
 
   void mainWindow.loadURL('https://discord.com/app').catch(error => {
     if (isQuitting || restartInProgress) return;
@@ -1503,8 +1544,18 @@ if (!hasSingleInstanceLock) {
     console.log('App ready.');
     appendLog('info', `Starting Kawaicord ${app.getVersion()}${sessionSafeMode ? ' in recovery mode' : ''}.`);
     setupKawaicordProtocol();
+    if (process.platform === 'darwin') {
+      Menu.setApplicationMenu(Menu.buildFromTemplate([
+        { label: 'Kawaicord', submenu: [{ role: 'about' }, { type: 'separator' },
+          { label: 'Check for updates…', click: () => { mainWindow?.show(); void checkForAppUpdates(); } },
+          { type: 'separator' }, { role: 'services' }, { type: 'separator' },
+          { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'quit' }] },
+        { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' }
+      ]));
+    }
     await setupVencordInjection();
     createWindow();
+    if (process.platform === 'darwin') await acknowledgeMacUpdate();
     configureAppUpdater();
     scheduleAutomaticUpdateCheck();
     // Bundled/cached mods make startup deterministic. This fallback refresh is
@@ -1514,6 +1565,9 @@ if (!hasSingleInstanceLock) {
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         createWindow();
+      } else {
+        mainWindow?.show();
+        mainWindow?.focus();
       }
     });
   }).catch(error => {

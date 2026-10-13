@@ -27,7 +27,7 @@ type KawaicordConfig = {
 };
 
 type AppUpdateStatus = {
-  phase: 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error';
+  phase: 'disabled' | 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'up-to-date' | 'error';
   currentVersion: string;
   availableVersion?: string;
   percent?: number;
@@ -439,7 +439,7 @@ async function renderSettingsPage(targetContainer?: HTMLElement) {
       <div class="kawaicord-option">
         <div>
           <div class="kawaicord-option-label">Start at Login</div>
-          <div class="kawaicord-option-desc">Launch Kawaicord when Windows starts.</div>
+          <div class="kawaicord-option-desc">Launch Kawaicord when you sign in.</div>
         </div>
         <label class="kawaicord-switch">
           <input type="checkbox" id="kawaicord-start-login-toggle" ${config.startAtLogin ? 'checked' : ''}>
@@ -475,7 +475,7 @@ async function renderSettingsPage(targetContainer?: HTMLElement) {
       <div class="kawaicord-option">
         <div>
           <div class="kawaicord-option-label">Automatic App Updates</div>
-          <div class="kawaicord-option-desc">Check GitHub Releases in the background and download verified updates. Installation happens on restart or exit.</div>
+          <div class="kawaicord-option-desc">Download updates from GitHub in the background. Choose Restart and update when you’re ready; your settings stay intact.</div>
         </div>
         <label class="kawaicord-switch">
           <input type="checkbox" id="kawaicord-app-update-toggle" ${config.autoUpdateApp ? 'checked' : ''}>
@@ -519,14 +519,16 @@ async function renderSettingsPage(targetContainer?: HTMLElement) {
     updateCard.dataset.phase = status.phase;
     updateMessage.textContent = status.message;
 
-    const busy = status.phase === 'checking' || status.phase === 'available' || status.phase === 'downloading';
+    const busy = ['checking', 'available', 'downloading', 'installing'].includes(status.phase);
     checkUpdateButton.disabled = busy || status.phase === 'downloaded' || status.phase === 'disabled';
     checkUpdateButton.textContent = status.phase === 'checking'
       ? 'Checking…'
       : status.phase === 'available' || status.phase === 'downloading'
         ? 'Downloading…'
         : 'Check for updates';
-    installUpdateButton.hidden = status.phase !== 'downloaded';
+    installUpdateButton.hidden = status.phase !== 'downloaded' && status.phase !== 'installing';
+    installUpdateButton.disabled = status.phase === 'installing';
+    installUpdateButton.textContent = status.phase === 'installing' ? 'Applying update…' : 'Restart and update';
 
     const showProgress = status.phase === 'downloading' || status.phase === 'downloaded';
     if (updateProgress && updateProgressFill) {

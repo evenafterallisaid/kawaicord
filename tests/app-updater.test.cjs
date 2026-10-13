@@ -18,10 +18,10 @@ test('installed builds update from the Kawaicord GitHub Releases feed', () => {
   assert.equal(packageJson.build.publish[0].repo, 'kawaicord');
   assert.match(main, /autoUpdater\.checkForUpdates\(\)/);
   assert.match(main, /autoUpdater\.autoDownload = true/);
-  assert.match(main, /autoUpdater\.autoInstallOnAppQuit = true/);
+  assert.match(main, /autoUpdater\.autoInstallOnAppQuit = false/);
   assert.match(main, /Update request rejected from an untrusted renderer/);
   assert.match(releaseWorkflow, /gh release upload/);
-  assert.match(releaseWorkflow, /build\/latest.yml/);
+  assert.match(releaseWorkflow, /build\/latest\*\.yml/);
   assert.match(releaseWorkflow, /GH_TOKEN/);
 });
 
@@ -32,7 +32,7 @@ test('update UI exposes manual checks, automatic checks, progress, and controlle
   assert.match(preload, /kawaicord-update-progress-fill/);
   assert.match(preload, /Restart and update/);
   assert.match(main, /autoUpdateApp/);
-  assert.match(main, /autoUpdater\.quitAndInstall\(false, true\)/);
+  assert.match(main, /autoUpdater\.quitAndInstall\(true, true\)/);
   assert.match(main, /flushStorageData\(\)/);
   assert.match(main, /updateRecoveryState\(true\)/);
   assert.match(main, /appUpdateStatus\.phase === 'downloaded'[\s\S]*installDownloadedAppUpdate\(\)/);

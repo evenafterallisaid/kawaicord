@@ -1,6 +1,6 @@
 {
   "name": "kawaicord",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "A polished Discord web client with Shelter and switchable Vencord or Equicord support",
   "main": "dist/main.js",
   "scripts": {
@@ -11,6 +11,9 @@
     "watch": "tsc -w",
     "postinstall": "install-electron",
     "package": "npm run build && electron-builder --win nsis --publish never",
+    "package:mac": "npm run build && electron-builder --mac dmg zip --universal --publish never",
+    "test:injection": "electron tests/electron-injection-smoke.cjs",
+    "test:mac-update": "electron tests/mac-native-update-smoke.cjs",
     "release": "npm run test && electron-builder --win nsis --publish always",
     "package:dir": "npm run build && electron-builder --dir"
   },
@@ -65,6 +68,45 @@
         }
       ],
       "icon": "icons/icon.ico"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "Kawaicord-${version}-mac-${arch}.${ext}",
+      "icon": "icons/icon.png",
+      "category": "public.app-category.social-networking",
+      "minimumSystemVersion": "12.0",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "notarize": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Kawaicord uses the microphone for Discord voice calls.",
+        "NSCameraUsageDescription": "Kawaicord uses the camera for Discord video calls.",
+        "NSScreenCaptureUsageDescription": "Kawaicord uses screen recording for Discord screen sharing."
+      }
+    },
+    "dmg": {
+      "title": "Kawaicord ${version}",
+      "backgroundColor": "#f7f4ff",
+      "iconSize": 112,
+      "window": {
+        "width": 540,
+        "height": 360
+      },
+      "contents": [
+        {
+          "x": 140,
+          "y": 170
+        },
+        {
+          "x": 400,
+          "y": 170,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,
