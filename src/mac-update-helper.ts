@@ -9,7 +9,7 @@ async function launch(executable: string, id?: string, args: string[] = []): Pro
   const environment = { ...process.env };
   delete environment.ELECTRON_RUN_AS_NODE;
   const child = spawn(executable, [...args, ...(id ? [`--kawaicord-update-id=${id}`] : [])], {
-    detached: true, stdio: 'ignore', env: environment
+    detached: true, stdio: ['ignore', 'inherit', 'inherit'], env: environment
   });
   await new Promise<void>((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
   let exited = false;

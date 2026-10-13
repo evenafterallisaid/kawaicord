@@ -64,6 +64,9 @@ app.whenReady().then(async () => {
     app.exit(0);
   } catch (error) {
     console.error(error);
+    console.error(await fs.readFile(path.join(profile, 'kawaicord.log'), 'utf8').catch(() => 'No app log in the test profile.'));
+    const receipt = JSON.parse(await fs.readFile(path.join(profile, 'mac-update.json'), 'utf8').catch(() => '{}'));
+    if (receipt.workDir) console.error(await fs.readFile(path.join(receipt.workDir, 'helper.log'), 'utf8').catch(() => 'No helper log.'));
     console.error(`Preserved diagnostic test directory: ${root}`);
     if (original?.exitCode === null) original.kill();
     app.exit(1);

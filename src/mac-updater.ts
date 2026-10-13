@@ -157,7 +157,10 @@ export async function acknowledgeMacUpdate() {
   const receipt = path.join(app.getPath('userData'), 'mac-update.json');
   const tx = JSON.parse(await fs.readFile(receipt, 'utf8')) as MacUpdateTransaction;
   validateMacTransaction(tx);
-  if (tx.receipt !== receipt || tx.id !== id || tx.version !== app.getVersion() || tx.target !== await fs.realpath(macAppBundle(app.getPath('exe')))) {
+  // /var is a symlink to /private/var on macOS; LaunchServices and the CLI can
+  // describe the same profile using either spelling.
+  if (await fs.realpath(tx.receipt) !== await fs.realpath(receipt) || tx.id !== id
+    || tx.version !== app.getVersion() || tx.target !== await fs.realpath(macAppBundle(app.getPath('exe')))) {
     throw new Error('Update startup receipt does not match this app.');
   }
   await fs.writeFile(path.join(tx.workDir, 'ack'), `${id}:${tx.version}`, { mode: 0o600 });
