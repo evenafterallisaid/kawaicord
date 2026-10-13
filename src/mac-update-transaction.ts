@@ -1,5 +1,6 @@
-import * as fs from 'node:fs/promises';
+import { physicalFs } from './physical-fs';
 import * as path from 'node:path';
+const fs = physicalFs();
 
 export type MacUpdateTransaction = {
   id: string;

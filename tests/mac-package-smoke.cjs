@@ -63,7 +63,7 @@ app.whenReady().then(async () => {
     assert.equal(updater.installationHelper.exitCode, 0);
     await wait(1000); // Let the smoke-test app finish its controlled exit.
     app.getPath = getPath;
-    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
+    await require('original-fs').promises.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 250 });
     app.exit(0);
   } catch (error) {
     console.error(error);

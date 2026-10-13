@@ -1,4 +1,4 @@
-Kawaicord 1.5.0 adds macOS support and an in-app update flow.
+Kawaicord 1.5.1 adds macOS support and an in-app update flow.
 
 - Universal macOS DMG for Apple Silicon and Intel, with Shelter and switchable Vencord/Equicord bundled.
 - Windows updates apply silently from Kawaicord settings; no installation wizard is needed for subsequent updates.

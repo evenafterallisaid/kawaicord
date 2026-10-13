@@ -8,6 +8,7 @@ import { ChildProcess, execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomBytes } from 'node:crypto';
 import { MacUpdateTransaction, validateMacTransaction } from './mac-update-transaction';
+import { physicalFs } from './physical-fs';
 
 const execute = promisify(execFile);
 const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
@@ -83,7 +84,7 @@ export class MacZipUpdater extends AppUpdater {
         try {
           const previous = JSON.parse(await fs.readFile(pendingPath, 'utf8')) as MacUpdateTransaction;
           validateMacTransaction(previous);
-          if (previous.target === target) await fs.rm(previous.workDir, { recursive: true, force: true });
+          if (previous.target === target) await physicalFs().rm(previous.workDir, { recursive: true, force: true });
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') this._logger.warn(`Could not clean previous update staging: ${String(error)}`);
         }
@@ -111,7 +112,7 @@ export class MacZipUpdater extends AppUpdater {
           this.dispatchUpdateDownloaded(event);
         } catch (error) {
           // mkdtemp created this exact, private directory beneath the app parent.
-          await fs.rm(workDir, { recursive: true, force: true });
+          await physicalFs().rm(workDir, { recursive: true, force: true });
           throw error;
         }
       }
@@ -129,7 +130,7 @@ export class MacZipUpdater extends AppUpdater {
       if (this.installationHelper.exitCode === null) throw new Error('The previous update attempt is still stopping. Try again shortly.');
     }
     for (const marker of ['ready', 'cancel', 'ack']) await fs.rm(path.join(tx.workDir, marker), { force: true });
-    for (const file of ['mac-update-helper.js', 'mac-update-transaction.js']) {
+    for (const file of ['mac-update-helper.js', 'mac-update-transaction.js', 'physical-fs.js']) {
       await fs.copyFile(path.join(__dirname, file), path.join(tx.workDir, file));
     }
     const manifest = path.join(tx.workDir, 'transaction.json');
