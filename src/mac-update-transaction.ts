@@ -10,11 +10,14 @@ export type MacUpdateTransaction = {
   backup: string;
   version: string;
   receipt: string;
+  args?: string[];
 };
 
 export function validateMacTransaction(tx: MacUpdateTransaction) {
   if (!/^[a-f0-9]{32}$/.test(tx.id) || !Number.isSafeInteger(tx.parentPid) || tx.parentPid <= 0
     || !/^\d+\.\d+\.\d+$/.test(tx.version)) throw new Error('Invalid update transaction.');
+  if (tx.args && (!Array.isArray(tx.args) || tx.args.length > 32
+    || tx.args.some(arg => typeof arg !== 'string' || arg.length > 4096 || arg.startsWith('--kawaicord-update-id=')))) throw new Error('Invalid update launch arguments.');
   for (const location of [tx.target, tx.workDir, tx.staged, tx.backup, tx.receipt]) {
     if (!path.isAbsolute(location) || path.resolve(location) !== location) throw new Error('Invalid update path.');
   }
@@ -29,7 +32,7 @@ export function validateMacTransaction(tx: MacUpdateTransaction) {
 export type UpdateProcess = { stop(): Promise<void>; exited(): boolean };
 export type TransactionRuntime = {
   parentAlive(): boolean;
-  launch(executable: string, id?: string): Promise<UpdateProcess>;
+  launch(executable: string, id?: string, args?: string[]): Promise<UpdateProcess>;
   wait(ms: number): Promise<void>;
   startupTimeoutMs?: number;
 };
@@ -69,7 +72,7 @@ export async function runMacUpdateTransaction(tx: MacUpdateTransaction, runtime:
     await fs.rename(tx.staged, tx.target);
     replaced = true;
     await state('launching');
-    replacement = await runtime.launch(path.join(tx.target, 'Contents', 'MacOS', 'Kawaicord'), tx.id);
+    replacement = await runtime.launch(path.join(tx.target, 'Contents', 'MacOS', 'Kawaicord'), tx.id, tx.args);
     const timeout = runtime.startupTimeoutMs ?? 60_000;
     for (let waited = 0; waited <= timeout; waited += 100) {
       const ack = await fs.readFile(path.join(tx.workDir, 'ack'), 'utf8').catch(() => '');
@@ -90,7 +93,7 @@ export async function runMacUpdateTransaction(tx: MacUpdateTransaction, runtime:
     if (replaced) await fs.rename(tx.target, tx.staged);
     if (backedUp) await fs.rename(tx.backup, tx.target);
     await state('rolled-back', String(error));
-    await runtime.launch(path.join(tx.target, 'Contents', 'MacOS', 'Kawaicord'));
+    await runtime.launch(path.join(tx.target, 'Contents', 'MacOS', 'Kawaicord'), undefined, tx.args);
     throw error;
   }
 }

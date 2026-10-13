@@ -14,6 +14,7 @@
     "package:mac": "npm run build && electron-builder --mac dmg zip --universal --publish never",
     "test:injection": "electron tests/electron-injection-smoke.cjs",
     "test:mac-update": "electron tests/mac-native-update-smoke.cjs",
+    "test:mac-package": "electron tests/mac-package-smoke.cjs",
     "release": "npm run test && electron-builder --win nsis --publish always",
     "package:dir": "npm run build && electron-builder --dir"
   },

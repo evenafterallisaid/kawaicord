@@ -5,10 +5,10 @@ import { MacUpdateTransaction, runMacUpdateTransaction, UpdateProcess } from './
 
 const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
-async function launch(executable: string, id?: string): Promise<UpdateProcess> {
+async function launch(executable: string, id?: string, args: string[] = []): Promise<UpdateProcess> {
   const environment = { ...process.env };
   delete environment.ELECTRON_RUN_AS_NODE;
-  const child = spawn(executable, id ? [`--kawaicord-update-id=${id}`] : [], {
+  const child = spawn(executable, [...args, ...(id ? [`--kawaicord-update-id=${id}`] : [])], {
     detached: true, stdio: 'ignore', env: environment
   });
   await new Promise<void>((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });

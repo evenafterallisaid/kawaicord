@@ -51,6 +51,9 @@ jobs:
           codesign --verify --deep --strict build/mac-universal/Kawaicord.app
           lipo -archs build/mac-universal/Kawaicord.app/Contents/MacOS/Kawaicord
           hdiutil verify build/Kawaicord-*-mac-universal.dmg
+      - name: Exercise packaged macOS update
+        if: matrix.platform == 'macos'
+        run: npm run test:mac-package
       - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.platform }}

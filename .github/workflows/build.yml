@@ -36,6 +36,8 @@ jobs:
       - if: matrix.platform == 'macos'
         run: npm run test:mac-update
       - run: npm run ${{ matrix.command }}
+      - if: matrix.platform == 'macos'
+        run: npm run test:mac-package
       - uses: actions/upload-artifact@v7
         with:
           name: Kawaicord-${{ matrix.platform }}

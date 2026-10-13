@@ -104,6 +104,7 @@ export class MacZipUpdater extends AppUpdater {
           if (currentTeam && await teamIdentifier(staged) !== currentTeam) throw new Error('Update signing identity does not match the installed app.');
           this.prepared = { id: randomBytes(16).toString('hex'), parentPid: process.pid, target, workDir, staged,
             backup: path.join(workDir, 'previous.app'), version: event.version,
+            args: process.argv.slice(1).filter(arg => !arg.startsWith('--kawaicord-update-id=') && arg !== '--restart-smoke-test'),
             receipt: path.join(app.getPath('userData'), 'mac-update.json') };
           await fs.writeFile(pendingPath, JSON.stringify(this.prepared), { mode: 0o600 });
           this.dispatchUpdateDownloaded(event);

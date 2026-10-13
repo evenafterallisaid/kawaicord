@@ -1182,7 +1182,7 @@ function createWindow() {
         reloadDiscord('unresponsive recovery', true);
       } else if (result.response === 2) {
         sessionSafeMode = true;
-        app.relaunch({ args: [...process.argv.slice(1).filter(arg => arg !== '--safe-mode'), '--safe-mode'] });
+        app.relaunch({ args: [...process.argv.slice(1).filter(arg => arg !== '--safe-mode' && !arg.startsWith('--kawaicord-update-id=')), '--safe-mode'] });
         isQuitting = true;
         stopRPC();
         updateRecoveryState(true);
