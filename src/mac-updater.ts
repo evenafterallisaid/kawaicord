@@ -61,6 +61,7 @@ async function teamIdentifier(bundle: string) {
 
 export class MacZipUpdater extends AppUpdater {
   private prepared: MacUpdateTransaction | null = null;
+  private installationHelper: ChildProcess | null = null;
   private downloader = new ElectronHttpExecutor();
 
   constructor() {
@@ -122,6 +123,12 @@ export class MacZipUpdater extends AppUpdater {
     if (!tx) throw new Error('No verified update is ready.');
     validateMacTransaction(tx);
     await fs.access(path.dirname(tx.target), fs.constants.W_OK);
+    if (this.installationHelper?.exitCode === null) {
+      await fs.writeFile(path.join(tx.workDir, 'cancel'), tx.id);
+      for (let elapsed = 0; elapsed < 2000 && this.installationHelper.exitCode === null; elapsed += 100) await wait(100);
+      if (this.installationHelper.exitCode === null) throw new Error('The previous update attempt is still stopping. Try again shortly.');
+    }
+    for (const marker of ['ready', 'cancel', 'ack']) await fs.rm(path.join(tx.workDir, marker), { force: true });
     for (const file of ['mac-update-helper.js', 'mac-update-transaction.js']) {
       await fs.copyFile(path.join(__dirname, file), path.join(tx.workDir, file));
     }
@@ -135,6 +142,7 @@ export class MacZipUpdater extends AppUpdater {
         detached: true, stdio: ['ignore', log.fd, log.fd],
         env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
       });
+      this.installationHelper = helper;
       const spawned = helper;
       await new Promise<void>((resolve, reject) => { spawned.once('spawn', resolve); spawned.once('error', reject); });
     } finally { await log.close(); }
