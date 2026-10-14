@@ -351,6 +351,7 @@ async function renderSettingsPage(targetContainer?: HTMLElement) {
     ${runtime.safeMode ? `
       <div class="kawaicord-recovery-notice">
         Shelter is still active. Vencord and Equicord are paused for this session because Kawaicord detected an unclean exit or repeated renderer failure. A normal restart will try ${currentModLabel} again.
+        <button type="button" class="kawaicord-banner-btn kawaicord-banner-btn-restart" id="kawaicord-retry-mod">Restart with ${currentModLabel}</button>
       </div>
     ` : ''}
 
@@ -636,6 +637,8 @@ async function renderSettingsPage(targetContainer?: HTMLElement) {
   }
 
   // --- Restart banner buttons ---
+  get<HTMLButtonElement>('#kawaicord-retry-mod')?.addEventListener('click', () =>
+    void (window as any).kawaicord.restart());
   get<HTMLButtonElement>('#kawaicord-banner-ignore')?.addEventListener('click', () => {
     if (banner) {
       banner.classList.remove('show');
@@ -1259,7 +1262,7 @@ function injectBootSplash() {
         <path fill="#ffd8e8" d="M28 39.1c0-2.2 2-3.6 4-2.1 2-1.5 4-.1 4 2.1 0 2.8-4 5.1-4 5.1s-4-2.3-4-5.1Z"/>
       </svg>
       <div class="label">Loading Discord</div>
-      <div class="detail" hidden>Kawaicord tried normal and recovery-mode reloads. You can safely try again.</div>
+      <div class="detail" hidden>Discord is taking longer than usual to load. You can wait or try again.</div>
       <div class="dots" aria-hidden="true"><span></span><span></span><span></span></div>
       <button type="button" class="retry" hidden>Retry Discord</button>
     `;
@@ -1275,9 +1278,10 @@ function injectBootSplash() {
     let slowTimer: number | null = null;
     let failureTimer: number | null = null;
     let finished = false;
-    const showFailure = () => {
+    const showFailure = (_event?: Electron.IpcRendererEvent, message?: string) => {
       if (finished) return;
       label.textContent = 'Discord could not start';
+      if (message) detail.textContent = message;
       detail.hidden = false;
       dots.hidden = true;
       retryButton.hidden = false;
@@ -1308,6 +1312,10 @@ function injectBootSplash() {
       if (readyFrames >= 2) {
         ipcRenderer.send('kawaicord:discordReady');
         finish();
+      } else if (visibleContent) {
+        // A quiet, fully rendered page may never mutate again. Verify its
+        // second frame ourselves instead of waiting for another DOM change.
+        scheduleReadyCheck();
       }
     };
     const scheduleReadyCheck = () => {

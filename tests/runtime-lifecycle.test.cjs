@@ -26,7 +26,7 @@ test('renderer reloads show a protected loading surface instead of a blank windo
   assert.match(preload, /kawaicord:discordReady/);
   assert.match(preload, /kawaicord:discordFailed/);
   assert.match(main, /Discord UI did not mount after 20 seconds/);
-  assert.match(main, /Discord UI recovery mode/);
+  assert.match(main, /keeping the selected client mod enabled/);
   assert.match(preload, /main, nav, \[role="tree"\]/);
 });
 

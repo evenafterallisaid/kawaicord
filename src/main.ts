@@ -62,6 +62,7 @@ let injectionWatchdogTimer: NodeJS.Timeout | null = null;
 let discordHealthWatchdogTimer: NodeJS.Timeout | null = null;
 let discordRecoveryAttempts = 0;
 let discordRendererReady = false;
+let discordDocumentFailed = false;
 let rendererRecoveryTimer: NodeJS.Timeout | null = null;
 let unresponsiveDialogOpen = false;
 let modBundleRefreshTimer: NodeJS.Timeout | null = null;
@@ -94,6 +95,7 @@ function clearDiscordHealthWatchdog() {
 function markRendererNavigation() {
   rendererInjectionReady = false;
   discordRendererReady = false;
+  discordDocumentFailed = false;
   clearInjectionWatchdog();
   clearDiscordHealthWatchdog();
 }
@@ -111,8 +113,9 @@ function requestRendererInjection(reason: string) {
   }, 8000);
 }
 
-function reloadDiscord(reason: string, ignoreCache = false) {
+function reloadDiscord(reason: string, ignoreCache = false, automaticRecovery = false) {
   if (!mainWindow || mainWindow.isDestroyed() || isQuitting || restartInProgress) return;
+  if (!automaticRecovery) discordRecoveryAttempts = 0;
   markRendererNavigation();
   appendLog('info', `Reloading Discord renderer (${reason}).`);
   if (ignoreCache) {
@@ -176,27 +179,35 @@ function setUnreadOverlay(count: number) {
 
 function armDiscordHealthWatchdog() {
   clearDiscordHealthWatchdog();
+  // Chromium also finishes loading its error document after a network/TLS
+  // failure. That document cannot mount Discord or initialize browser mods.
+  if (discordDocumentFailed || discordRendererReady) return;
   discordHealthWatchdogTimer = setTimeout(() => {
     discordHealthWatchdogTimer = null;
-    if (discordRendererReady || !mainWindow || mainWindow.isDestroyed() || isQuitting) return;
+    if (discordDocumentFailed || discordRendererReady || !mainWindow || mainWindow.isDestroyed() || isQuitting) return;
 
     discordRecoveryAttempts += 1;
     if (discordRecoveryAttempts === 1) {
       appendLog('warn', 'Discord UI did not mount after 20 seconds; retrying the renderer.');
-      reloadDiscord('Discord UI health recovery');
+      reloadDiscord('Discord UI health recovery', false, true);
       return;
     }
 
-    if (discordRecoveryAttempts === 2) {
-      sessionSafeMode = true;
-      appendLog('warn', 'Discord UI still did not mount; retrying without Vencord/Equicord.');
-      reloadDiscord('Discord UI recovery mode', true);
-      return;
-    }
-
-    appendLog('error', 'Discord UI did not mount after automatic recovery attempts.');
+    // A slow Discord/CDN response is not evidence of a crashing mod. Keep the
+    // selected mod enabled, and leave the live page able to finish loading.
+    // Only actual renderer crashes (or an explicit recovery start) pause mods.
+    appendLog('error', 'Discord UI did not mount after a reload; keeping the selected client mod enabled.');
     mainWindow.webContents.send('kawaicord:discordFailed');
   }, 20_000);
+}
+
+function markDiscordLoadFailed(code: number, description: string, url: string) {
+  discordDocumentFailed = true;
+  clearInjectionWatchdog();
+  clearDiscordHealthWatchdog();
+  appendLog('error', `Discord failed to load (${code}: ${description}) at ${url}.`);
+  mainWindow?.webContents.send('kawaicord:discordFailed',
+    `Discord could not be reached (${description}). Check your connection and try again.`);
 }
 
 function updateWindowPerformance() {
@@ -1118,8 +1129,10 @@ function createWindow() {
   });
 
   mainWindow.webContents.on('did-finish-load', () => {
-    requestRendererInjection('page finished loading');
-    armDiscordHealthWatchdog();
+    if (!discordDocumentFailed) {
+      requestRendererInjection('page finished loading');
+      armDiscordHealthWatchdog();
+    }
     sendWindowState();
     sendNavigationState();
   });
@@ -1132,7 +1145,7 @@ function createWindow() {
 
   mainWindow.webContents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
     if (!isMainFrame || code === -3) return;
-    appendLog('error', `Discord failed to load (${code}: ${description}) at ${url}.`);
+    markDiscordLoadFailed(code, description, url);
   });
 
   mainWindow.webContents.on('render-process-gone', (_event, details) => {

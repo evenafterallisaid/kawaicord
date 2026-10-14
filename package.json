@@ -13,6 +13,7 @@
     "package": "npm run build && electron-builder --win nsis --publish never",
     "package:mac": "npm run build && electron-builder --mac dmg zip --universal --publish never",
     "test:injection": "electron tests/electron-injection-smoke.cjs",
+    "test:discord": "npm run build && electron tests/discord-live-smoke.cjs",
     "test:mac-update": "electron tests/mac-native-update-smoke.cjs",
     "test:mac-package": "electron tests/mac-package-smoke.cjs",
     "release": "npm run test && electron-builder --win nsis --publish always",

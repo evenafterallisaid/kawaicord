@@ -22,7 +22,7 @@ Kawaicord is a Windows and macOS desktop wrapper for Discord's web app with prot
 - Windows receives Discord's unread count as a taskbar overlay badge.
 - macOS receives unread badges in the Dock, a native application menu, and a menu-bar tray icon.
 - Recovery mode keeps Shelter available while pausing a repeatedly crashing client mod.
-- A UI health watchdog verifies that Discord actually mounted, retries one normal reload, then recovers without the selected client mod instead of leaving a blank window.
+- A UI health watchdog verifies that Discord actually mounted and retries one normal reload. Slow connections and certificate failures keep the selected client mod enabled; repeated renderer crashes still trigger recovery mode.
 - The Windows controls live inside Discord's own platform-aware app bar, use crisp stock-style caption glyphs, follow its live theme tokens (including pure-black AMOLED themes), and reserve their space plus a small safety gap without covering navigation or toolbar actions.
 - Window controls are isolated inside a closed shadow root, while a targeted layout guard prevents third-party themes from moving, hiding, or collapsing Discord's app bar and navigation controls.
 - Background performance mode pauses decorative animation and avatar painting while hidden, suspends titlebar/theme visual maintenance, and restores it on show. Calls, messages, audio, and notification timers remain unthrottled by default.
@@ -74,7 +74,7 @@ Kawaicord records a small rotating log at:
 %APPDATA%\kawaicord\kawaicord.log
 ```
 
-After a recent unclean exit, Kawaicord starts in recovery mode. Shelter still loads, but Vencord/Equicord is skipped for that session. Restart normally to try the selected mod again. A second renderer crash in one session also triggers this recovery behavior.
+After a recent unclean exit, Kawaicord starts in recovery mode. Shelter still loads, but Vencord/Equicord is skipped for that session. Select **Restart with Vencord/Equicord** in Kawaicord settings (or restart from the tray) to try the selected mod again. A second renderer crash in one session also triggers this recovery behavior. A slow load or network/certificate failure does not disable mods; the loading screen offers a retry while the page can still finish loading.
 
 User settings, cached mod bundles, and Discord session data remain under `%APPDATA%\kawaicord`. Uninstalling does not delete that profile by default.
 
@@ -93,6 +93,8 @@ npm start
 ```
 
 The install step downloads the matching Electron runtime automatically.
+
+Run `npm test` for lifecycle regressions and `npm run test:injection` for offline browser-mod startup and reload checks. The optional `npm run test:discord` checks that both bundled mods and Shelter actually initialize against the current Discord sign-in page, using a fresh test profile. It requires access to Discord and is useful when refreshing the bundled fallback builds.
 
 Create the Windows installer:
 
