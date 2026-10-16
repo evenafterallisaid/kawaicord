@@ -2,6 +2,7 @@
 mod bundles;
 mod config;
 mod games;
+mod navigation;
 mod rpc;
 mod updater;
 use config::{Config, Recovery, WindowState};
@@ -34,6 +35,10 @@ pub struct RuntimeStatus {
     pub error: Option<String>,
     pub version: String,
     pub platform: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_elapsed: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_hidden: Option<bool>,
 }
 struct AppState {
     profile: PathBuf,
@@ -267,7 +272,25 @@ fn report_runtime(
     config::save_json(&state.profile.join("runtime.json"), &status)?;
     *state.runtime.lock().map_err(|e| e.to_string())? = status.clone();
     if state.smoke {
-        let code = if status.ready { 0 } else { 1 };
+        if std::env::args().any(|a| a == "--background-test")
+            && status.ready
+            && status.background_elapsed.is_none()
+        {
+            let serialized = serde_json::to_string(&status).map_err(|e| e.to_string())?;
+            window.eval(format!(r#"(()=>{{const start=performance.now();setTimeout(()=>{{const status={serialized};status.backgroundElapsed=Math.round(performance.now()-start);status.backgroundHidden=document.hidden;status.ready=!!window.shelter&&Object.keys(window.Vencord?.Webpack?.cache||{{}}).length>100;window.__TAURI_INTERNALS__.invoke('report_runtime',{{status}});}},370000);}})()"#)).map_err(|e|e.to_string())?;
+            background(&window, true);
+            window.hide().map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+        let code = if status.ready
+            && status
+                .background_elapsed
+                .is_none_or(|elapsed| elapsed >= 370000 && status.background_hidden == Some(true))
+        {
+            0
+        } else {
+            1
+        };
         clean_exit(&app);
         app.exit(code);
     } else if status.ready {
@@ -391,8 +414,7 @@ fn build_discord(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     .initialization_script(script)
     .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
     .on_navigation(move |url| {
-        let trusted = url.as_str() == "about:blank"
-            || (url.scheme() == "https" && url.host_str() == Some("discord.com"));
+        let trusted = navigation::embedded(url);
         if !trusted {
             open_external(&nav_app, url)
         }
@@ -420,7 +442,6 @@ fn build_discord(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let window = builder.build()?;
     #[cfg(target_os = "macos")]
     {
-        let navigate = window.clone();
         window.with_webview(move |view| unsafe {
             use objc2::{msg_send, runtime::AnyObject};
             use objc2_foundation::{ns_string, NSNumber};
@@ -430,8 +451,9 @@ fn build_discord(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             let yes = NSNumber::numberWithBool(true);
             let _: () =
                 msg_send![preferences,setValue:&*yes,forKey:ns_string!("mediaDevicesEnabled")];
-            let _ = navigate.navigate("https://discord.com/app".parse().unwrap());
         })?;
+        // finish the native callback before dispatching another tauri operation.
+        window.navigate("https://discord.com/app".parse()?)?;
     }
     if saved.maximized {
         let _ = window.maximize();
@@ -484,12 +506,10 @@ fn desktop(app: &AppHandle) -> tauri::Result<()> {
         .separator()
         .text("show", "Show Discord")
         .text("settings", "Settings…")
-        .separator()
-        .hide()
-        .hide_others()
-        .separator()
-        .item(&quit)
-        .build()?;
+        .separator();
+    #[cfg(target_os = "macos")]
+    let file = file.hide().hide_others().separator();
+    let file = file.item(&quit).build()?;
     let edit = SubmenuBuilder::new(app, "Edit")
         .undo()
         .redo()
@@ -501,12 +521,10 @@ fn desktop(app: &AppHandle) -> tauri::Result<()> {
         .build()?;
     let view = SubmenuBuilder::new(app, "View")
         .text("reload", "Reload Discord")
-        .text("restart", "Restart Kawaicord")
-        .separator()
-        .minimize()
-        .maximize()
-        .fullscreen()
-        .build()?;
+        .text("restart", "Restart Kawaicord");
+    #[cfg(target_os = "macos")]
+    let view = view.separator().minimize().maximize().fullscreen();
+    let view = view.build()?;
     let menu = MenuBuilder::new(app)
         .items(&[&file, &edit, &view])
         .build()?;
@@ -604,6 +622,8 @@ fn main() {
                 error: None,
                 version: env!("CARGO_PKG_VERSION").into(),
                 platform: std::env::consts::OS.into(),
+                background_elapsed: None,
+                background_hidden: None,
             };
             let window_state: WindowState = config::read_json(&profile.join("window.json"));
             app.manage(AppState {
@@ -650,7 +670,12 @@ fn main() {
             if smoke {
                 let handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_secs(90)).await;
+                    let timeout = if std::env::args().any(|a| a == "--background-test") {
+                        430
+                    } else {
+                        90
+                    };
+                    tokio::time::sleep(std::time::Duration::from_secs(timeout)).await;
                     handle.state::<AppState>().log("Smoke test timed out");
                     clean_exit(&handle);
                     handle.exit(2);

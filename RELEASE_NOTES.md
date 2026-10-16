@@ -2,6 +2,7 @@ kawaicord 2.0.0-beta.1. the coffee is doing most of the work.
 
 - replaced the electron host with rust and tauri on macos, windows, and linux. the app uses the system webview and has no node sidecar.
 - added illegalcord alongside vencord and equicord. shelter still loads separately.
+- kept hcaptcha frames inside discord so verification no longer opens an external browser.
 - macos finally gets actual native traffic lights and a native titlebar.
 - calls, messages, audio, and notifications stay live when hidden. background mode only pauses decorative drawing.
 - moved settings, tray integration, startup preferences, notifications, rpc, and signed updates into the native host.

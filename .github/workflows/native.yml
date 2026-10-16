@@ -48,6 +48,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
       - name: linux webview and packaging dependencies
         if: matrix.platform == 'linux'
         run: |
