@@ -1,9 +1,15 @@
-Kawaicord 1.5.2 fixes client-mod startup on macOS and improves Discord loading recovery on both platforms.
+kawaicord 2.0.0-beta.1. the coffee is doing most of the work.
 
-- Refreshed the bundled Vencord, Equicord, and Shelter builds to support Discord's current startup hooks.
-- Slow loads and network or certificate failures no longer disable the selected client mod for the rest of the session.
-- Fixed readiness detection that could mistake a fully rendered Discord page for a failed load.
-- Added a button in recovery-mode settings to restart with the selected client mod.
-- Added lifecycle regression tests and an optional live Discord initialization check. Both Vencord and Equicord were verified with Shelter against Discord's sign-in page on macOS.
+- replaced the electron host with rust and tauri on macos, windows, and linux. the app uses the system webview and has no node sidecar.
+- added illegalcord alongside vencord and equicord. shelter still loads separately.
+- macos finally gets actual native traffic lights and a native titlebar.
+- calls, messages, audio, and notifications stay live when hidden. background mode only pauses decorative drawing.
+- moved settings, tray integration, startup preferences, notifications, rpc, and signed updates into the native host.
+- game detection is optional and disabled by default to avoid background scanning.
+- added universal mac installers, windows x64 installers, and linux x64 deb and appimage packages to one release pipeline.
 
-For a first Mac installation, open the DMG and drag Kawaicord to Applications. macOS builds are ad-hoc signed and are not notarized; first-launch Gatekeeper approval may be required. Windows builds remain unsigned.
+this is the first native preview. install it manually and sign in again; the 1.x profile is retained separately. v1.5.2 remains the stable release. do not run both clients at once unless you enjoy duplicate notifications.
+
+startup smoke checks cover the real discord sign-in page, shelter, all three client mods, and media api availability. authenticated calls and screen sharing still need real usage on each platform. webview media support varies with the os, codecs, and permissions.
+
+mac builds are ad hoc signed and are not notarized. first launch may require approval in system settings. windows builds are unsigned. native updater payloads are signed with the project's update key.

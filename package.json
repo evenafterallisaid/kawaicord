@@ -1,124 +1,31 @@
 {
   "name": "kawaicord",
-  "version": "1.5.2",
-  "description": "A polished Discord web client with Shelter and switchable Vencord or Equicord support",
-  "main": "dist/main.js",
-  "scripts": {
-    "start": "npm run build && electron .",
-    "build": "tsc",
-    "test": "npm run build && node --test tests/*.test.cjs",
-    "dev": "npm run build && electron .",
-    "watch": "tsc -w",
-    "postinstall": "install-electron",
-    "package": "npm run build && electron-builder --win nsis --publish never",
-    "package:mac": "npm run build && electron-builder --mac dmg zip --universal --publish never",
-    "test:injection": "electron tests/electron-injection-smoke.cjs",
-    "test:discord": "npm run build && electron tests/discord-live-smoke.cjs",
-    "test:mac-update": "electron tests/mac-native-update-smoke.cjs",
-    "test:mac-package": "electron tests/mac-package-smoke.cjs",
-    "release": "npm run test && electron-builder --win nsis --publish always",
-    "package:dir": "npm run build && electron-builder --dir"
-  },
-  "author": "Kawaicord contributors",
+  "version": "2.0.0-beta.1",
+  "private": true,
+  "description": "a native discord client with shelter and three client mods",
   "license": "MIT",
+  "author": "Kawaicord contributors",
   "engines": {
     "node": ">=22.12"
   },
+  "scripts": {
+    "start": "tauri dev",
+    "dev": "tauri dev",
+    "tauri": "tauri",
+    "build": "tsc --noEmit && node scripts/build-native.mjs",
+    "test": "npm run build && cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo test --locked --manifest-path src-tauri/Cargo.toml && cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
+    "package": "tauri build",
+    "package:mac": "tauri build --target universal-apple-darwin --bundles app,dmg",
+    "package:windows": "tauri build --bundles nsis",
+    "package:linux": "tauri build --bundles deb,appimage",
+    "test:discord": "node scripts/smoke-native.mjs"
+  },
   "dependencies": {
-    "arrpc": "^3.6.0",
-    "electron-updater": "6.8.9"
+    "@tauri-apps/api": "2.12.4"
   },
   "devDependencies": {
-    "@types/node": "^22.20.1",
-    "electron": "^44.1.0",
-    "electron-builder": "^26.15.3",
-    "typescript": "^5.9.3"
-  },
-  "build": {
-    "appId": "com.kawaicord.app",
-    "productName": "Kawaicord",
-    "icon": "icons/icon.ico",
-    "asar": true,
-    "compression": "maximum",
-    "artifactName": "Kawaicord-Setup-${version}-${arch}.${ext}",
-    "directories": {
-      "output": "build"
-    },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "evenafterallisaid",
-        "repo": "kawaicord",
-        "releaseType": "release"
-      }
-    ],
-    "files": [
-      "dist/**/*",
-      "icons/**/*",
-      "vencord/**/*",
-      "equicord/**/*",
-      "shelter/**/*",
-      "plugins/**/*"
-    ],
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "icons/icon.ico"
-    },
-    "mac": {
-      "target": [
-        "dmg",
-        "zip"
-      ],
-      "artifactName": "Kawaicord-${version}-mac-${arch}.${ext}",
-      "icon": "icons/icon.png",
-      "category": "public.app-category.social-networking",
-      "minimumSystemVersion": "12.0",
-      "identity": "-",
-      "hardenedRuntime": false,
-      "notarize": false,
-      "extendInfo": {
-        "NSMicrophoneUsageDescription": "Kawaicord uses the microphone for Discord voice calls.",
-        "NSCameraUsageDescription": "Kawaicord uses the camera for Discord video calls.",
-        "NSScreenCaptureUsageDescription": "Kawaicord uses screen recording for Discord screen sharing."
-      }
-    },
-    "dmg": {
-      "title": "Kawaicord ${version}",
-      "backgroundColor": "#f7f4ff",
-      "iconSize": 112,
-      "window": {
-        "width": 540,
-        "height": 360
-      },
-      "contents": [
-        {
-          "x": 140,
-          "y": 170
-        },
-        {
-          "x": 400,
-          "y": 170,
-          "type": "link",
-          "path": "/Applications"
-        }
-      ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "deleteAppDataOnUninstall": false,
-      "installerIcon": "icons/icon.ico",
-      "uninstallerIcon": "icons/icon.ico",
-      "shortcutName": "Kawaicord"
-    }
+    "@tauri-apps/cli": "2.12.3",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3"
   }
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-refresh-mods"
+description = "Enables the refresh_mods command without any pre-configured scope."
+commands.allow = ["refresh_mods"]
+
+[[permission]]
+identifier = "deny-refresh-mods"
+description = "Denies the refresh_mods command without any pre-configured scope."
+commands.deny = ["refresh_mods"]

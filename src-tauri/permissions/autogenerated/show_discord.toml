@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-show-discord"
+description = "Enables the show_discord command without any pre-configured scope."
+commands.allow = ["show_discord"]
+
+[[permission]]
+identifier = "deny-show-discord"
+description = "Denies the show_discord command without any pre-configured scope."
+commands.deny = ["show_discord"]

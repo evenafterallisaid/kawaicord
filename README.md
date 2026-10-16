@@ -1,149 +1,103 @@
-# Kawaicord
+# kawaicord
 
-<p align="center">
-  <img src="icons/icon.png" alt="Kawaicord mascot" width="144">
-</p>
+<p align="center"><img src="icons/icon.png" alt="kawaicord mascot" width="144"></p>
 
-Kawaicord is a Windows and macOS desktop wrapper for Discord's web app with protected window controls, always-on Shelter support, and one-click switching between Vencord and Equicord.
+discord, shelter, and your choice of vencord, equicord, or illegalcord. now with a rust host, tauri, a small typescript bridge, and slightly less coffee spilled into the runtime.
 
-> [!IMPORTANT]
-> Kawaicord is an independent, unofficial project. It is not affiliated with or endorsed by Discord Inc., Vencord, Equicord, or Shelter. Client modifications may violate Discord's Terms of Service; use them at your own risk.
+## the native rewrite
 
-## Highlights
+2.0 is a preview of the new native client for macos, windows, and linux. the previous electron release is available as [v1.5.2](https://github.com/evenafterallisaid/kawaicord/releases/tag/v1.5.2).
 
-- Shelter loads on every normal and recovery-mode start.
-- Choose exactly one client mod: Vencord or Equicord.
-- The selected mod is refreshed automatically, with cached and installer-bundled fallbacks.
-- App updates are checked against GitHub Releases, downloaded with integrity verification, and installed on restart without replacing the user profile.
-- Mod changes are applied through a guarded, clean process restart.
-- Vencord and Equicord's own restart buttons are routed through the same restart path, including hard-reload variants used by newer bundles.
-- Ctrl+R, Ctrl+Shift+R, and F5 use a controlled renderer refresh that shows a protected loading surface and verifies Shelter plus the selected client mod after every navigation.
-- Discord's back/forward controls and a theme-proof drag region remain available in the shared app bar.
-- Windows receives Discord's unread count as a taskbar overlay badge.
-- macOS receives unread badges in the Dock, a native application menu, and a menu-bar tray icon.
-- Recovery mode keeps Shelter available while pausing a repeatedly crashing client mod.
-- A UI health watchdog verifies that Discord actually mounted and retries one normal reload. Slow connections and certificate failures keep the selected client mod enabled; repeated renderer crashes still trigger recovery mode.
-- The Windows controls live inside Discord's own platform-aware app bar, use crisp stock-style caption glyphs, follow its live theme tokens (including pure-black AMOLED themes), and reserve their space plus a small safety gap without covering navigation or toolbar actions.
-- Window controls are isolated inside a closed shadow root, while a targeted layout guard prevents third-party themes from moving, hiding, or collapsing Discord's app bar and navigation controls.
-- Background performance mode pauses decorative animation and avatar painting while hidden, suspends titlebar/theme visual maintenance, and restores it on show. Calls, messages, audio, and notification timers remain unthrottled by default.
-- After a minute hidden, unused image-cache memory is reclaimed only when at least 64 MiB and half the cache are unused, and no audio/video element is playing. No renderer suspension, forced garbage collection, or periodic reloads are used for memory savings.
-- Optional stronger background throttling is available for users who prefer battery savings.
-- Window size, position, and maximized state are restored safely across monitor changes.
-- Discord science and Sentry telemetry requests are blocked without interfering with normal API traffic.
-- Hardware-accelerated rendering, video decode, and WebRTC encoding are enabled for smoother calls and screen sharing when supported, while Chromium's GPU safety fallback remains intact for unstable drivers.
-- App updates, arRPC, tray behavior, startup behavior, and mod updates are configurable inside Discord settings.
+- macos uses wkwebview and the real native titlebar, including the three traffic lights.
+- windows uses the system webview2 runtime and native window controls.
+- linux uses webkitgtk 4.1, with deb and appimage builds in the same release pipeline.
+- shelter loads separately from the selected client mod, including in recovery mode.
+- mod updates download after startup. complete cached pairs and installer copies provide fallbacks.
+- closing the window keeps discord live by default. calls, messages, audio, and notifications are never deliberately suspended or unloaded to save memory.
+- background performance mode pauses decorative animations and image painting while hidden. it restores them when shown.
+- native rpc accepts activity from local applications without a node sidecar. automatic game detection is optional and off by default; enabling it checks executable paths every 30 seconds.
+- settings use a small local window that is destroyed when closed. discord has a restricted native bridge with no filesystem or shell access.
+- native releases use signed updater payloads. automatic checks never install an update or restart a call on their own.
 
-## Install
+using a system webview removes the bundled chromium and node runtime. discord, client mods, and the webview still use memory. actual savings depend on your platform, account, plugins, and active calls. a small host process alone is not a measurement of total app memory.
 
-Download `Kawaicord-Setup-<version>-x64.exe` from the latest GitHub release and run the installer. The assisted installer can create Start menu and desktop shortcuts and lets you choose the installation directory.
+## install
 
-On macOS 12 or newer, download `Kawaicord-<version>-mac-universal.dmg`, open it, and drag Kawaicord to Applications. The universal app runs on both Apple Silicon and Intel Macs. Shelter, the selected client mod, settings, recovery, and background performance mode are included on both platforms. macOS will request microphone, camera, and screen-recording access when those features are used.
+get packages from [releases](https://github.com/evenafterallisaid/kawaicord/releases). native preview releases are marked prerelease until the rewrite has had real usage across platforms.
 
-Current Mac releases are ad-hoc signed, not Apple Developer ID signed or notarized. Gatekeeper may require approval for the first launch through System Settings → Privacy & Security. This approval is separate from installing or updating the app; the updater does not disable Gatekeeper.
+| system | package | requirements |
+| --- | --- | --- |
+| macos | universal `.dmg` | macos 12 or newer, intel or apple silicon |
+| windows | `x64-setup.exe` | windows 10 or newer, webview2 evergreen runtime |
+| linux | `.deb` or `.AppImage` | x86_64, webkitgtk 4.1; ubuntu 22.04 or newer recommended |
 
-Kawaicord downloads Shelter plus the selected Vencord/Equicord browser bundle when an update is due. If the update service is unavailable, it uses the last known-good cached copy or the bundled fallback.
+mac builds are ad hoc signed and are not notarized. the first launch may need approval through system settings, privacy & security. windows installers are unsigned. on linux, mark the appimage executable before opening it; the deb package installs its webview dependencies through the package manager.
 
-Mod refreshes happen after the window is created, so a slow mod CDN cannot hold up Discord startup. The cached or installer-bundled copy is used for the current launch and a newly downloaded copy is ready for the next controlled refresh or restart.
+the native app uses a separate profile from 1.x. **you will need to sign in again**, and existing electron mod settings are not automatically migrated. the old profile is retained. close the old client before using the new one to avoid duplicate notifications and competing rpc listeners.
 
-## App updates
+this is an unofficial discord client. upstream client mods keep their own licenses and compatibility constraints. microphone, camera, codecs, and screen sharing depend on the system webview and os permissions. startup checks exercise the live discord sign-in page, shelter, the selected mod, and media api availability. they do not prove an authenticated voice or screen sharing session works on every desktop.
 
-Open Discord's settings and select **Kawaicord → Updates** to check manually or enable automatic app updates. Installed builds read update metadata from this repository's GitHub Releases. Downloads happen in the background with SHA-512 verification and progress in settings. Choose **Restart and update** when ready. A download never interrupts a call, and merely closing to the tray or quitting does not automatically apply it.
+## settings and recovery
 
-On Windows, Kawaicord applies the verified NSIS payload silently and relaunches, without opening the installation wizard. On macOS, its native main-process updater downloads the ZIP, checks the app identity, version, architecture, and code-signature integrity, and stages it beside the installed app. A detached helper waits for the old process to quit, replaces the app using filesystem renames, and relaunches it. If the replacement exits or fails to confirm startup within a minute, the helper restores and relaunches the previous app. A Developer ID signed installation additionally requires the update to use the same Team ID.
+click the kawaicord button at the bottom right, use the native settings menu, or press `cmd+,` / `ctrl+,`.
 
-Updates replace application files only. Configuration, Discord sessions, client-mod settings, and cached bundles remain in `%APPDATA%\kawaicord` on Windows or `~/Library/Application Support/kawaicord` on macOS. Mac updates require an installed, writable app location; the updater cannot replace an app running from its read-only DMG or a translocated location. Managed installations with restricted permissions must be updated by their administrator.
+choose vencord, equicord, or illegalcord, then save and restart. exactly one client mod loads alongside shelter. the mods' restart buttons and the usual reload shortcuts use the native host.
 
-Kawaicord remains an independent client and does not forge official-client identity or quest progress. Features that Discord permits in its web client work normally, while arRPC supplies legitimate local Rich Presence information for supported games and applications.
+updates are checked after startup and then every six hours. open settings to check manually and choose when to install. native beta builds can receive later native prereleases; stable native builds ignore prereleases. the electron updater cannot install the native rewrite, so the initial migration uses a downloaded installer. appimage installs support native updates; deb installations should be updated with a new deb package.
 
-## Switch Vencord and Equicord
+recovery mode keeps shelter while skipping the client mod. use it from settings if a plugin breaks startup. a recent unclean app exit also enables recovery for that launch. slow downloads never disable a mod. on macos, a crashed web content process gets one reload, then one recovery attempt; repeated crashes stop the reload cycle and open settings.
 
-1. Open Discord's settings.
-2. Select **Kawaicord**.
-3. Choose **Vencord** or **Equicord** under **Active Mod**.
-4. Select **Restart** in the banner.
+profiles and the rotating `kawaicord.log` are stored in:
 
-The old Electron process explicitly stops arRPC, flushes Discord storage with a bounded timeout, schedules the replacement, destroys the tray and window, and exits. If a replacement cannot be scheduled, Kawaicord keeps the current process usable and reports the failure instead of disappearing. This applies to Kawaicord's restart buttons and restart actions inside Vencord or Equicord. Only the selected client mod is injected after restart; Shelter is injected separately and remains enabled.
+- macos: `~/Library/Application Support/com.kawaicord.native/`
+- windows: `%APPDATA%\com.kawaicord.native\`
+- linux: `$XDG_DATA_HOME/com.kawaicord.native/`, normally `~/.local/share/com.kawaicord.native/`
 
-A normal renderer refresh does not restart the whole process. Kawaicord intercepts the standard refresh shortcuts, reloads Discord, and runs an idempotent injection check with automatic retries and a main-process watchdog. This prevents a refreshed window from silently coming back without Shelter, Vencord, or Equicord.
+`--safe-mode` requests recovery, `--profile <directory>` selects a diagnostic configuration directory, and `--smoke-test` uses a temporary webview session and exits after reporting startup status. on macos, persistent webkit storage is associated with the app identifier; changing `--profile` alone does not isolate discord cookies.
 
-## Recovery and logs
+## build it
 
-Kawaicord records a small rotating log at:
+install node 22.12 or newer, npm, stable rust with rustfmt and clippy, and the [tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/). windows needs the microsoft c++ build tools. macos needs xcode command line tools.
 
-```text
-%APPDATA%\kawaicord\kawaicord.log
+on ubuntu:
+
+```sh
+sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
 ```
 
-After a recent unclean exit, Kawaicord starts in recovery mode. Shelter still loads, but Vencord/Equicord is skipped for that session. Select **Restart with Vencord/Equicord** in Kawaicord settings (or restart from the tray) to try the selected mod again. A second renderer crash in one session also triggers this recovery behavior. A slow load or network/certificate failure does not disable mods; the loading screen offers a retry while the page can still finish loading.
-
-User settings, cached mod bundles, and Discord session data remain under `%APPDATA%\kawaicord`. Uninstalling does not delete that profile by default.
-
-## Build from source
-
-Requirements:
-
-- Windows 10 or newer, or macOS 12 or newer
-- Node.js 22.12 or newer
-- npm
-
-```powershell
-npm ci
-npm run build
-npm start
-```
-
-The install step downloads the matching Electron runtime automatically.
-
-Run `npm test` for lifecycle regressions and `npm run test:injection` for offline browser-mod startup and reload checks. The optional `npm run test:discord` checks that both bundled mods and Shelter actually initialize against the current Discord sign-in page, using a fresh test profile. It requires access to Discord and is useful when refreshing the bundled fallback builds.
-
-Create the Windows installer:
-
-```powershell
-npm run package
-```
-
-The NSIS installer is written to `build/`. For an unpacked smoke-test build, use `npm run package:dir`.
-
-Build the universal macOS DMG and ZIP on a Mac:
+then:
 
 ```sh
 npm ci
+npm test
+npm start
+```
+
+create packages on the matching platform:
+
+```sh
+npm run package:windows
+npm run package:linux
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
 npm run package:mac
 ```
 
-The DMG is the first-install package; the ZIP is the in-app updater payload. Windows cannot build a real DMG, so GitHub Actions uses a macOS runner for these artifacts. Both architectures are packaged into one universal app.
+installers go under `src-tauri/target/`, in the release bundle directory for the chosen target. updater artifacts require `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. for an unsigned development package, disable updater artifact generation:
 
-Tagged releases use `.github/workflows/release.yml`. A tag such as `v1.5.0` builds Windows and macOS packages, tests native Mac update/rollback, verifies the DMG and app signature, and publishes only after both builds succeed. The release includes the EXE, DMG, ZIP, `latest.yml`, `latest-mac.yml`, and matching block maps.
-
-## Project layout
-
-```text
-src/                 Electron main process, preload UI, arRPC bridge
-plugins/settings/    Shelter settings-section bridge
-shelter/             Bundled offline Shelter fallback
-vencord/              Bundled offline Vencord fallback
-equicord/             Bundled offline Equicord fallback
-icons/                Vector logo sources plus app, installer, and tray artwork
+```sh
+npm run tauri -- build --config '{"bundle":{"createUpdaterArtifacts":false}}'
 ```
 
-`dist/`, `build/`, and `node_modules/` are generated locally and ignored by Git.
+`npm test` checks typescript, rust formatting, regression tests, and clippy. `npm run test:discord -- /absolute/path/to/kawaicord` opens isolated sign-in sessions for all three client mods, reports actual initialization, and exits. linux needs a graphical session or `xvfb-run -a`. it never uses an existing discord login.
 
-## Release checklist
+## releases
 
-```powershell
-npm ci
-npm test
-npm audit --omit=dev
-npm run package
-```
+`.github/workflows/native.yml` builds all three platforms. macos packages are universal, windows uses nsis, and linux publishes deb plus appimage. every package must build and all three live mod startup checks must pass on each platform before the release workflow publishes the draft. native updater metadata is `latest.json`, with signed platform payloads.
 
-GitHub Actions runs tests and packaging on Windows and macOS and uploads both installers as workflow artifacts. Version tags additionally publish a complete GitHub Release with the updater metadata.
+version tags must match `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`. tags with a suffix such as `v2.0.0-beta.1` publish prereleases and leave the current stable release unchanged.
 
-## License and credits
+## source and credits
 
-Kawaicord's original source code is available under the [MIT License](LICENSE). Bundled third-party components retain their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+`src-tauri/` contains the rust host, desktop integration, rpc, bundle cache, and updater. `native-ui/` contains settings and the document-start typescript bridge. `native-data/` holds the optional game detection list. the three mod directories and `shelter/` contain installer fallbacks. generated assets, build output, and dependencies are ignored by git.
 
-- [Shelter](https://github.com/uwu/shelter)
-- [Vencord](https://github.com/Vendicated/Vencord)
-- [Equicord](https://github.com/Equicord/Equicord)
-- [arRPC](https://github.com/OpenAsar/arrpc)
+original kawaicord source is [mit licensed](LICENSE). bundled mods keep their upstream licenses. see [third-party notices](THIRD_PARTY_NOTICES.md), including [shelter](https://github.com/uwu/shelter), [vencord](https://github.com/Vendicated/Vencord), [equicord](https://github.com/Equicord/Equicord), [illegalcord](https://github.com/ImHisako/Illegalcord), and [arrpc](https://github.com/OpenAsar/arrpc).

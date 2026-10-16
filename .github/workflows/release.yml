@@ -1,84 +1,32 @@
-name: Release
-
+name: release
 on:
   push:
-    tags: ["v*"]
-
+    tags: ['v*']
 permissions:
   contents: write
-
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
-
 jobs:
-  package:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            platform: windows
-            command: package
-          - os: macos-latest
-            platform: macos
-            command: package:mac
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm audit --omit=dev
-      - name: Verify release version
-        shell: pwsh
-        run: |
-          $version = node -p "require('./package.json').version"
-          if ("v$version" -ne "${{ github.ref_name }}") { throw "Version does not match release tag" }
-      - run: npm test
-      - run: npm run test:injection
-      - name: Exercise native macOS update and rollback
-        if: matrix.platform == 'macos'
-        run: npm run test:mac-update
-      - name: Build packages
-        run: npm run ${{ matrix.command }}
-      - name: Check macOS bundle and disk image
-        if: matrix.platform == 'macos'
-        run: |
-          codesign --verify --deep --strict build/mac-universal/Kawaicord.app
-          lipo -archs build/mac-universal/Kawaicord.app/Contents/MacOS/Kawaicord
-          hdiutil verify build/Kawaicord-*-mac-universal.dmg
-      - name: Exercise packaged macOS update
-        if: matrix.platform == 'macos'
-        run: npm run test:mac-package
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-${{ matrix.platform }}
-          path: |
-            build/*.exe
-            build/*.dmg
-            build/*.zip
-            build/*.blockmap
-            build/latest*.yml
-          if-no-files-found: error
-
+  native:
+    uses: ./.github/workflows/native.yml
+    with:
+      release: true
+      tag: ${{ github.ref_name }}
+    secrets: inherit
   publish:
-    needs: package
+    needs: native
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v7
-        with:
-          pattern: release-*
-          merge-multiple: true
-          path: release-assets
-      - name: Publish complete release
+      - name: publish after every platform passes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "Kawaicord ${GITHUB_REF_NAME#v}" --notes-file RELEASE_NOTES.md --repo "$GITHUB_REPOSITORY"
-          gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
-          gh release edit "$GITHUB_REF_NAME" --draft=false --latest --repo "$GITHUB_REPOSITORY"
+          version=$(node -p "require('./package.json').version")
+          test "v$version" = "$GITHUB_REF_NAME"
+          if [[ "$version" == *-* ]]; then
+            gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease --latest=false --notes-file RELEASE_NOTES.md --repo "$GITHUB_REPOSITORY"
+          else
+            gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease=false --latest --notes-file RELEASE_NOTES.md --repo "$GITHUB_REPOSITORY"
+          fi

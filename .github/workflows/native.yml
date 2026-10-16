@@ -1,0 +1,86 @@
+name: native builds
+on:
+  workflow_call:
+    inputs:
+      release:
+        type: boolean
+        default: false
+      tag:
+        type: string
+        default: ''
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        required: false
+permissions:
+  contents: read
+jobs:
+  package:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macos
+            args: --target universal-apple-darwin --bundles app,dmg
+            binary: src-tauri/target/universal-apple-darwin/release/bundle/macos/Kawaicord.app/Contents/MacOS/kawaicord
+          - os: windows-latest
+            platform: windows
+            args: --bundles nsis
+            binary: src-tauri/target/release/kawaicord.exe
+          - os: ubuntu-22.04
+            platform: linux
+            args: --bundles deb,appimage
+            binary: src-tauri/target/release/kawaicord
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: ${{ matrix.platform == 'macos' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: linux webview and packaging dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev xvfb xdg-utils
+      - run: npm ci
+      - run: npm test
+      - run: npm audit --omit=dev
+      - name: build packages
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        with:
+          args: ${{ matrix.args }} ${{ !inputs.release && '--config {"bundle":{"createUpdaterArtifacts":false}}' || '' }}
+          tagName: ${{ inputs.release && inputs.tag || '' }}
+          releaseName: kawaicord __VERSION__, coffee acquired
+          releaseBody: native rewrite preview. full notes are in RELEASE_NOTES.md. install packages are below.
+          releaseDraft: true
+          prerelease: ${{ contains(inputs.tag, '-') }}
+          uploadWorkflowArtifacts: true
+          updaterJsonPreferNsis: true
+      - name: check macos signature and architectures
+        if: matrix.platform == 'macos'
+        run: |
+          codesign --verify --deep --strict src-tauri/target/universal-apple-darwin/release/bundle/macos/Kawaicord.app
+          lipo -archs "${{ matrix.binary }}"
+          hdiutil verify src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+      - name: live discord startup with all three mods
+        if: matrix.platform != 'linux'
+        run: node scripts/smoke-native.mjs "${{ matrix.binary }}"
+      - name: live discord startup with all three mods on linux
+        if: matrix.platform == 'linux'
+        run: xvfb-run -a node scripts/smoke-native.mjs "${{ matrix.binary }}"

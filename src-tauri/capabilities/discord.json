@@ -1,0 +1,1 @@
+{"identifier":"discord","description":"Narrow bridge for Discord; no files, shell, config writes, or updates","windows":["main"],"local":false,"remote":{"urls":["https://discord.com/*"]},"permissions":["allow-open-settings","allow-reload-discord","allow-restart-app","allow-report-runtime","allow-set-unread","allow-notification-permission","allow-notify"]}

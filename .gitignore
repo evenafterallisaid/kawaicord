@@ -27,3 +27,10 @@ Thumbs.db
 
 # Test output
 coverage/
+
+# native build output
+web-dist/
+src-tauri/target/
+src-tauri/gen/
+*.key
+*.key.pub

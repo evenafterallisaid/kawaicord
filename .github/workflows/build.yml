@@ -1,48 +1,11 @@
-name: Build
-
+name: build
 on:
   push:
-    branches: [main]
+    branches: [main, agent/native-rust-rewrite]
   pull_request:
   workflow_dispatch:
-
 permissions:
-  contents: read
-
+  contents: write
 jobs:
-  package:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            platform: windows
-            command: package
-          - os: macos-latest
-            platform: macos
-            command: package:mac
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm test
-      - run: npm audit --omit=dev
-      - run: npm run test:injection
-      - if: matrix.platform == 'macos'
-        run: npm run test:mac-update
-      - run: npm run ${{ matrix.command }}
-      - if: matrix.platform == 'macos'
-        run: npm run test:mac-package
-      - uses: actions/upload-artifact@v7
-        with:
-          name: Kawaicord-${{ matrix.platform }}
-          path: |
-            build/*.exe
-            build/*.dmg
-            build/*.zip
-          if-no-files-found: error
+  native:
+    uses: ./.github/workflows/native.yml

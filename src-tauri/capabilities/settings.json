@@ -1,0 +1,1 @@
+{"identifier":"settings","description":"Trusted local Kawaicord settings","windows":["settings"],"permissions":["core:default","allow-show-discord","allow-restart-app","allow-restart-recovery","allow-get-settings","allow-save-config","allow-refresh-mods","allow-check-update","allow-install-update","allow-open-releases"]}

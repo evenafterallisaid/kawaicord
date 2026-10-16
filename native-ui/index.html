@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kawaicord Settings</title><link rel="stylesheet" href="settings.css"></head>
+<body><main>
+<header><img src="icon.png" width="56" height="56" alt=""><div><h1>Kawaicord</h1><p id="version">Native desktop client</p></div><span id="runtime">Loading…</span></header>
+<section><h2>Client mod</h2><p>Shelter loads alongside your chosen mod.</p><label for="mod">Active mod</label><select id="mod"><option value="vencord">Vencord</option><option value="equicord">Equicord</option><option value="illegalcord">Illegalcord</option></select><p id="mod-status"></p><button id="restart">Save and restart</button></section>
+<section><h2>Background &amp; desktop</h2><div id="options"></div><p class="hint">Calls, messages, and notifications stay live while hidden. Background mode pauses decorative animation; it never unloads Discord.</p></section>
+<section><h2>Updates &amp; recovery</h2><p id="update-status">Updates are checked in the native app.</p><div class="actions"><button id="check-update">Check for updates</button><button id="apply-update" hidden>Install update and restart</button><button id="refresh-mods">Refresh mod bundles</button><button id="recovery">Restart in recovery mode</button><button id="normal">Restart normally</button></div></section>
+<p id="notice" role="status" aria-live="polite"></p><footer><button id="open-discord">Back to Discord</button><a id="project" href="#">Project &amp; releases ↗</a></footer>
+</main><script type="module" src="settings.js"></script></body></html>

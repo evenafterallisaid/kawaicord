@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reload-discord"
+description = "Enables the reload_discord command without any pre-configured scope."
+commands.allow = ["reload_discord"]
+
+[[permission]]
+identifier = "deny-reload-discord"
+description = "Denies the reload_discord command without any pre-configured scope."
+commands.deny = ["reload_discord"]
