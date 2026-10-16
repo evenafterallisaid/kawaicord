@@ -52,6 +52,7 @@ export function createDiscordSettings(invoke: Invoke): HTMLElement {
       }
       const button = (title: string, action: () => Promise<void>, primary = false) => component('Button', {
         children: title, color: primary ? ui.ButtonColors.PRIMARY : ui.ButtonColors.SECONDARY,
+        size: ui.ButtonSizes.MEDIUM, grow: true,
         get disabled() { return busy(); }, onClick: () => void act(action)
       });
       root.replaceChildren();
