@@ -1,6 +1,6 @@
 [package]
 name = "kawaicord"
-version = "2.0.0-beta.1"
+version = "2.0.0-beta.2"
 description = "A lightweight native Discord web client"
 authors = ["Kawaicord contributors"]
 edition = "2021"
@@ -42,6 +42,10 @@ block2 = "0.6.2"
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = "2.0.2"
 gtk = "0.18"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+webview2-com = "0.39.1"
+windows = "0.62.2"
 
 [profile.release]
 codegen-units = 1

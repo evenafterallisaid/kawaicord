@@ -11,6 +11,7 @@ const backgroundTest = process.argv.includes('--background');
 const integrationTest = process.argv.includes('--integration');
 for (const activeMod of integrationTest ? ['illegalcord'] : backgroundTest ? ['vencord'] : ['vencord', 'equicord', 'illegalcord']) {
   const profile = await mkdtemp(join(tmpdir(), 'kawaicord-smoke-'));
+  let failed = false;
   try {
     await writeFile(join(profile, 'config.json'), JSON.stringify({ activeMod, richPresence: false,
       autoUpdateMods: false, autoUpdateApp: false, notifications: false, startAtLogin: false }));
@@ -43,5 +44,9 @@ for (const activeMod of integrationTest ? ['illegalcord'] : backgroundTest ? ['v
     if (backgroundTest) { assert.equal(status.backgroundHidden, true); assert.ok(status.backgroundElapsed >= 370000); }
     if (integrationTest) { assert.equal(integration.ok, true, JSON.stringify(integration)); console.log(JSON.stringify(integration)); }
     console.log(JSON.stringify(status));
-  } finally { await rm(profile, { recursive: true, force: true }); }
+  } catch (error) { failed = true; throw error; }
+  finally {
+    try { await rm(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }); }
+    catch (error) { if (!failed) throw error; console.error(`temporary profile cleanup: ${String(error)}`); }
+  }
 }

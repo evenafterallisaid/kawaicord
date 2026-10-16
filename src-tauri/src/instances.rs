@@ -198,6 +198,12 @@ pub async fn open_instance(
             builder = builder.data_directory(data);
         }
     } else {
+        #[cfg(not(target_os = "macos"))]
+        {
+            let data = profile(&app, &id).join("temporary-webview");
+            std::fs::create_dir_all(&data).map_err(|e| e.to_string())?;
+            builder = builder.data_directory(data);
+        }
         builder = builder.incognito(true);
     }
     #[cfg(target_os = "macos")]
@@ -304,67 +310,37 @@ pub async fn clear_instance_session(
     if app.get_webview_window(&label).is_some() {
         return Err("Close the instance before clearing its saved session.".into());
     }
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    if objc2_foundation::NSProcessInfo::processInfo()
+        .operatingSystemVersion()
+        .majorVersion
+        < 14
     {
-        #[cfg(target_os = "macos")]
-        if objc2_foundation::NSProcessInfo::processInfo()
-            .operatingSystemVersion()
-            .majorVersion
-            < 14
-        {
-            return Err("Saved isolated instances require macOS 14 or newer.".into());
-        }
-        let builder = tauri::WebviewWindowBuilder::new(
-            &app,
-            format!("clear-{label}"),
-            WebviewUrl::External("about:blank".parse().unwrap()),
-        )
-        .visible(false);
-        #[cfg(target_os = "macos")]
-        let builder = builder.data_store_identifier(store_id(&id.to_ascii_lowercase()));
-        #[cfg(target_os = "linux")]
-        let builder = {
-            let data = profile(&app, &id).join("webview");
-            std::fs::create_dir_all(&data).map_err(|e| e.to_string())?;
-            builder.data_directory(data)
-        };
-        let temporary = builder.build().map_err(|e| e.to_string())?;
-        let cleared = clear_native_store(&temporary).await;
-        let destroyed = temporary.destroy().map_err(|e| e.to_string());
-        cleared?;
-        destroyed?;
-        wait_closed(&app, &[format!("clear-{label}")]).await?;
+        return Err("Saved isolated instances require macOS 14 or newer.".into());
     }
-    // webkitgtk keeps its context alive after the last window closes. let its
-    // storage manager clear data without unlinking files that context still owns.
-    #[cfg(target_os = "linux")]
-    {
-        Ok(())
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let dir = profile(&app, &id);
-        for attempt in 0..100 {
-            if !dir.exists() {
-                return Ok(());
-            }
-            match std::fs::remove_dir_all(&dir) {
-                Ok(()) => return Ok(()),
-                Err(error)
-                    if attempt < 99
-                        && (error.kind() == std::io::ErrorKind::PermissionDenied
-                            || (cfg!(target_os = "windows")
-                                && matches!(error.raw_os_error(), Some(32 | 33)))) =>
-                {
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                }
-                Err(error) => return Err(error.to_string()),
-            }
-        }
-        Ok(())
-    }
+    let builder = tauri::WebviewWindowBuilder::new(
+        &app,
+        format!("clear-{label}"),
+        WebviewUrl::External("about:blank".parse().unwrap()),
+    )
+    .visible(false);
+    #[cfg(target_os = "macos")]
+    let builder = builder.data_store_identifier(store_id(&id.to_ascii_lowercase()));
+    #[cfg(not(target_os = "macos"))]
+    let builder = {
+        let data = profile(&app, &id).join("webview");
+        std::fs::create_dir_all(&data).map_err(|e| e.to_string())?;
+        builder.data_directory(data)
+    };
+    let temporary = builder.build().map_err(|e| e.to_string())?;
+    // the engine owns both cached and saved login data, including after windows close.
+    let cleared = clear_native_store(&temporary).await;
+    let destroyed = temporary.destroy().map_err(|e| e.to_string());
+    cleared?;
+    destroyed?;
+    wait_closed(&app, &[format!("clear-{label}")]).await
 }
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+
 async fn clear_native_store(window: &WebviewWindow) -> Result<(), String> {
     let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
     window.with_webview(move |view| {
@@ -382,6 +358,23 @@ async fn clear_native_store(window: &WebviewWindow) -> Result<(), String> {
                 if let Some(tx) = sender.lock().unwrap().take() { let _ = tx.send(Ok(())); }
             });
             let _: () = msg_send![store, removeDataOfTypes:types, modifiedSince:&*date, completionHandler:&*callback];
+        }
+        #[cfg(target_os = "windows")]
+        unsafe {
+            use webview2_com::{ClearBrowsingDataCompletedHandler, Microsoft::Web::WebView2::Win32::{ICoreWebView2_13, ICoreWebView2Profile2}};
+            use windows::core::Interface;
+            let sender = std::sync::Arc::new(std::sync::Mutex::new(Some(tx)));
+            let completion = sender.clone();
+            let result: windows::core::Result<()> = (|| {
+                view.controller().CoreWebView2()?.cast::<ICoreWebView2_13>()?.Profile()?.cast::<ICoreWebView2Profile2>()?
+                    .ClearBrowsingDataAll(&ClearBrowsingDataCompletedHandler::create(Box::new(move |result| {
+                        if let Some(tx) = completion.lock().unwrap().take() { let _ = tx.send(result.map_err(|error|error.to_string())); }
+                        Ok(())
+                    })))
+            })();
+            if let Err(error) = result {
+                if let Some(tx) = sender.lock().unwrap().take() { let _ = tx.send(Err(error.to_string())); }
+            }
         }
         #[cfg(target_os = "linux")]
         {

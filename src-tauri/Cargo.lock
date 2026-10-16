@@ -2117,7 +2117,7 @@ dependencies = [
 
 [[package]]
 name = "kawaicord"
-version = "2.0.0-beta.1"
+version = "2.0.0-beta.2"
 dependencies = [
  "base64 0.22.1",
  "block2",
@@ -2145,6 +2145,8 @@ dependencies = [
  "tokio-tungstenite",
  "url",
  "webkit2gtk",
+ "webview2-com",
+ "windows",
 ]
 
 [[package]]

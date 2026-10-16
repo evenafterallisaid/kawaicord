@@ -1,4 +1,4 @@
-kawaicord 2.0.0-beta.1. the coffee is doing most of the work.
+kawaicord 2.0.0-beta.2. the coffee is doing most of the work.
 
 - replaced the electron host with rust and tauri on macos, windows, and linux. the app uses the system webview and has no node sidecar.
 - added illegalcord alongside vencord and equicord. shelter still loads separately.

@@ -136,8 +136,48 @@ async fn check(app: &AppHandle, main: &WebviewWindow) -> Result<Value, String> {
         return Err("Cleared instance login data returned after reopening".into());
     }
     super::instances::close_instance(app.clone(), main.clone(), id_a.clone()).await?;
-    super::instances::clear_instance_session(app.clone(), main.clone(), id_a).await?;
+    super::instances::clear_instance_session(app.clone(), main.clone(), id_a.clone()).await?;
+    for (id, name) in [(&id_a, "temporary a"), (&id_b, "temporary b")] {
+        super::instances::open_instance(
+            app.clone(),
+            main.clone(),
+            id.to_owned(),
+            name.into(),
+            false,
+            "discord.com".into(),
+            false,
+            false,
+            "detached".into(),
+        )
+        .await?;
+    }
+    let temporary_a = instance_ready(app, &id_a).await?;
+    let temporary_b = instance_ready(app, &id_b).await?;
+    evaluate(&temporary_a, "(()=>{document.cookie='__kawaicord_isolation_cookie=alpha;Path=/;Secure;SameSite=Lax';const frame=document.createElement('iframe');frame.hidden=true;document.body.append(frame);frame.contentWindow.localStorage.setItem('__kawaicord_isolation_probe','alpha');frame.remove();return true})()").await?;
+    let isolated = evaluate(&temporary_b, "(()=>{const frame=document.createElement('iframe');frame.hidden=true;document.body.append(frame);const clean=frame.contentWindow.localStorage.getItem('__kawaicord_isolation_probe')===null;frame.remove();return clean&&!document.cookie.split(';').some(cookie=>cookie.trim().startsWith('__kawaicord_isolation_cookie='))})()").await?;
+    if isolated != true {
+        return Err("Temporary instance sessions were shared".into());
+    }
+    super::instances::close_all_instances(app.clone(), main.clone()).await?;
+    super::instances::open_instance(
+        app.clone(),
+        main.clone(),
+        id_a.clone(),
+        "reopened temporary session".into(),
+        false,
+        "discord.com".into(),
+        false,
+        false,
+        "detached".into(),
+    )
+    .await?;
+    let temporary = instance_ready(app, &id_a).await?;
+    let fresh = evaluate(&temporary, "(()=>{const frame=document.createElement('iframe');frame.hidden=true;document.body.append(frame);const clean=frame.contentWindow.localStorage.getItem('__kawaicord_isolation_probe')===null;frame.remove();return clean&&!document.cookie.split(';').some(cookie=>cookie.trim().startsWith('__kawaicord_isolation_cookie='))})()").await?;
+    if fresh != true {
+        return Err("Temporary instance restored a closed session".into());
+    }
+    super::instances::close_all_instances(app.clone(), main.clone()).await?;
     Ok(
-        json!({"ok":true,"separateSessionStorage":true,"clearedSessionStayedCleared":true,"discordSettingsRendered":true,"buttonLabelsFit":true,"oauthConfigurationLoaded":true,"nativeInstanceHelper":true}),
+        json!({"ok":true,"separateSessionStorage":true,"clearedSessionStayedCleared":true,"temporarySessionsIsolated":true,"temporarySessionNotRestored":true,"discordSettingsRendered":true,"buttonLabelsFit":true,"oauthConfigurationLoaded":true,"nativeInstanceHelper":true}),
     )
 }

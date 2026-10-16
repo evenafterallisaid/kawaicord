@@ -97,7 +97,7 @@ npm run tauri -- build --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
 `.github/workflows/native.yml` builds all three platforms. macos packages are universal, windows uses nsis, and linux publishes deb plus appimage. every package must build and all three live mod startup checks must pass on each platform before the release workflow publishes the draft. native updater metadata is `latest.json`, with signed platform payloads.
 
-version tags must match `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`. tags with a suffix such as `v2.0.0-beta.1` publish prereleases and leave the current stable release unchanged.
+version tags must match `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`. tags with a suffix such as `v2.0.0-beta.2` publish prereleases and leave the current stable release unchanged.
 
 ## source and credits
 
