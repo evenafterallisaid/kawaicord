@@ -21,6 +21,26 @@ async fn evaluate(window: &WebviewWindow, script: &str) -> Result<Value, String>
     }
     Ok(result["value"].clone())
 }
+async fn instance_ready(app: &AppHandle, id: &str) -> Result<WebviewWindow, String> {
+    let label = format!("instance-{id}");
+    for _ in 0..60 {
+        let ready = app
+            .state::<super::instances::Instances>()
+            .0
+            .lock()
+            .unwrap()
+            .get(&label)
+            .is_some_and(|instance| instance.ready);
+        if ready {
+            return app
+                .get_webview_window(&label)
+                .ok_or_else(|| format!("Instance {id} disappeared"));
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    Err(format!("Instance {id} did not finish loading"))
+}
+
 pub async fn run(app: AppHandle, main: WebviewWindow) {
     let result = check(&app, &main).await;
     let state = app.state::<super::AppState>();
@@ -53,37 +73,16 @@ async fn check(app: &AppHandle, main: &WebviewWindow) -> Result<Value, String> {
         .await?;
         log(&format!("Integration: opened {id}"));
     }
-    for _ in 0..60 {
-        let ready = app
-            .state::<super::instances::Instances>()
-            .0
-            .lock()
-            .unwrap()
-            .values()
-            .filter(|i| i.ready)
-            .count();
-        if ready == 2 {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-    }
-    let a = app
-        .get_webview_window(&format!("instance-{id_a}"))
-        .ok_or("Instance A missing")?;
-    let b = app
-        .get_webview_window(&format!("instance-{id_b}"))
-        .ok_or("Instance B missing")?;
-    log(&format!("Integration: A {:?}, B {:?}", a.url(), b.url()));
-    let details = evaluate(&a,"({href:location.href,storage:typeof localStorage,title:document.title,ready:document.readyState,text:document.body?.textContent?.slice(0,200),bridge:typeof window.__TAURI_INTERNALS__,shelter:!!window.shelter})").await?;
-    log(&format!("Integration: A document {details}"));
+    let a = instance_ready(app, &id_a).await?;
+    let b = instance_ready(app, &id_b).await?;
     evaluate(
         &a,
-        "(()=>{const frame=document.createElement('iframe');frame.hidden=true;document.body.append(frame);frame.contentWindow.localStorage.setItem('__kawaicord_isolation_probe','alpha');frame.remove();return true})()",
+        "(()=>{document.cookie='__kawaicord_isolation_cookie=alpha;Path=/;Secure;SameSite=Lax';const frame=document.createElement('iframe');frame.hidden=true;document.body.append(frame);frame.contentWindow.localStorage.setItem('__kawaicord_isolation_probe','alpha');frame.remove();return true})()",
     )
     .await?;
     let isolation = evaluate(
         &b,
-        "(()=>{const frame=document.createElement('iframe');frame.hidden=true;document.body.append(frame);const clean=frame.contentWindow.localStorage.getItem('__kawaicord_isolation_probe')===null;frame.remove();return clean})()",
+        "(()=>{const frame=document.createElement('iframe');frame.hidden=true;document.body.append(frame);const clean=frame.contentWindow.localStorage.getItem('__kawaicord_isolation_probe')===null;frame.remove();return clean&&!document.cookie.split(';').some(cookie=>cookie.trim().startsWith('__kawaicord_isolation_cookie='))})()",
     )
     .await?
         == true;
@@ -116,10 +115,29 @@ async fn check(app: &AppHandle, main: &WebviewWindow) -> Result<Value, String> {
         return Err("Multi-instance bridge missing".into());
     }
     super::instances::close_all_instances(app.clone(), main.clone()).await?;
-    for id in [id_a, id_b] {
-        super::instances::clear_instance_session(app.clone(), main.clone(), id).await?;
+    for id in [&id_a, &id_b] {
+        super::instances::clear_instance_session(app.clone(), main.clone(), id.to_owned()).await?;
     }
+    super::instances::open_instance(
+        app.clone(),
+        main.clone(),
+        id_a.clone(),
+        "cleared session".into(),
+        true,
+        "discord.com".into(),
+        false,
+        false,
+        "detached".into(),
+    )
+    .await?;
+    let reopened = instance_ready(app, &id_a).await?;
+    let cleared = evaluate(&reopened,"(()=>{const frame=document.createElement('iframe');frame.hidden=true;document.body.append(frame);const clean=frame.contentWindow.localStorage.getItem('__kawaicord_isolation_probe')===null;frame.remove();return clean&&!document.cookie.split(';').some(cookie=>cookie.trim().startsWith('__kawaicord_isolation_cookie='))})()").await?;
+    if cleared != true {
+        return Err("Cleared instance login data returned after reopening".into());
+    }
+    super::instances::close_instance(app.clone(), main.clone(), id_a.clone()).await?;
+    super::instances::clear_instance_session(app.clone(), main.clone(), id_a).await?;
     Ok(
-        json!({"ok":true,"separateSessionStorage":true,"discordSettingsRendered":true,"buttonLabelsFit":true,"oauthConfigurationLoaded":true,"nativeInstanceHelper":true}),
+        json!({"ok":true,"separateSessionStorage":true,"clearedSessionStayedCleared":true,"discordSettingsRendered":true,"buttonLabelsFit":true,"oauthConfigurationLoaded":true,"nativeInstanceHelper":true}),
     )
 }

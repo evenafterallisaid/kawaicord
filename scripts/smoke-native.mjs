@@ -19,7 +19,7 @@ for (const activeMod of integrationTest ? ['illegalcord'] : backgroundTest ? ['v
     });
     let output = '';
     for (const stream of [child.stdout, child.stderr]) stream.on('data', data => { output = (output + data).slice(-12000); });
-    const timer = setTimeout(() => child.kill('SIGKILL'), backgroundTest ? 450000 : integrationTest ? 210000 : 110000);
+    const timer = setTimeout(() => child.kill('SIGKILL'), backgroundTest ? 450000 : integrationTest ? 330000 : 110000);
     let code;
     try {
       code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', resolve); });

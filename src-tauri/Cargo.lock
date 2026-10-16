@@ -2120,8 +2120,10 @@ name = "kawaicord"
 version = "2.0.0-beta.1"
 dependencies = [
  "base64 0.22.1",
+ "block2",
  "env_logger",
  "futures-util",
+ "gtk",
  "libc",
  "log",
  "objc2",
@@ -2142,6 +2144,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "url",
+ "webkit2gtk",
 ]
 
 [[package]]

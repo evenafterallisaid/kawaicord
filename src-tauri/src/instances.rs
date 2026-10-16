@@ -304,8 +304,9 @@ pub async fn clear_instance_session(
     if app.get_webview_window(&label).is_some() {
         return Err("Close the instance before clearing its saved session.".into());
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
+        #[cfg(target_os = "macos")]
         if objc2_foundation::NSProcessInfo::processInfo()
             .operatingSystemVersion()
             .majorVersion
@@ -313,40 +314,92 @@ pub async fn clear_instance_session(
         {
             return Err("Saved isolated instances require macOS 14 or newer.".into());
         }
-        let temporary = tauri::WebviewWindowBuilder::new(
+        let builder = tauri::WebviewWindowBuilder::new(
             &app,
             format!("clear-{label}"),
             WebviewUrl::External("about:blank".parse().unwrap()),
         )
-        .visible(false)
-        .data_store_identifier(store_id(&id.to_ascii_lowercase()))
-        .build()
-        .map_err(|e| e.to_string())?;
-        temporary
-            .clear_all_browsing_data()
-            .map_err(|e| e.to_string())?;
-        temporary.destroy().map_err(|e| e.to_string())?;
+        .visible(false);
+        #[cfg(target_os = "macos")]
+        let builder = builder.data_store_identifier(store_id(&id.to_ascii_lowercase()));
+        #[cfg(target_os = "linux")]
+        let builder = {
+            let data = profile(&app, &id).join("webview");
+            std::fs::create_dir_all(&data).map_err(|e| e.to_string())?;
+            builder.data_directory(data)
+        };
+        let temporary = builder.build().map_err(|e| e.to_string())?;
+        let cleared = clear_native_store(&temporary).await;
+        let destroyed = temporary.destroy().map_err(|e| e.to_string());
+        cleared?;
+        destroyed?;
+        wait_closed(&app, &[format!("clear-{label}")]).await?;
     }
-    let dir = profile(&app, &id);
-    for attempt in 0..100 {
-        if !dir.exists() {
-            return Ok(());
-        }
-        match std::fs::remove_dir_all(&dir) {
-            Ok(()) => return Ok(()),
-            Err(error)
-                if attempt < 99
-                    && (error.kind() == std::io::ErrorKind::PermissionDenied
-                        || (cfg!(target_os = "windows")
-                            && matches!(error.raw_os_error(), Some(32 | 33)))) =>
-            {
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    // webkitgtk keeps its context alive after the last window closes. let its
+    // storage manager clear data without unlinking files that context still owns.
+    #[cfg(target_os = "linux")]
+    {
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let dir = profile(&app, &id);
+        for attempt in 0..100 {
+            if !dir.exists() {
+                return Ok(());
             }
-            Err(error) => return Err(error.to_string()),
+            match std::fs::remove_dir_all(&dir) {
+                Ok(()) => return Ok(()),
+                Err(error)
+                    if attempt < 99
+                        && (error.kind() == std::io::ErrorKind::PermissionDenied
+                            || (cfg!(target_os = "windows")
+                                && matches!(error.raw_os_error(), Some(32 | 33)))) =>
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+                Err(error) => return Err(error.to_string()),
+            }
         }
+        Ok(())
     }
-    Ok(())
 }
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+async fn clear_native_store(window: &WebviewWindow) -> Result<(), String> {
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+    window.with_webview(move |view| {
+        #[cfg(target_os = "macos")]
+        unsafe {
+            use objc2::{class, msg_send, runtime::AnyObject};
+            use objc2_foundation::NSDate;
+            let inner = view.inner() as *mut AnyObject;
+            let config: *mut AnyObject = msg_send![inner, configuration];
+            let store: *mut AnyObject = msg_send![config, websiteDataStore];
+            let types: *mut AnyObject = msg_send![class!(WKWebsiteDataStore), allWebsiteDataTypes];
+            let date = NSDate::dateWithTimeIntervalSince1970(0.0);
+            let sender = std::sync::Mutex::new(Some(tx));
+            let callback = block2::RcBlock::new(move || {
+                if let Some(tx) = sender.lock().unwrap().take() { let _ = tx.send(Ok(())); }
+            });
+            let _: () = msg_send![store, removeDataOfTypes:types, modifiedSince:&*date, completionHandler:&*callback];
+        }
+        #[cfg(target_os = "linux")]
+        {
+            use webkit2gtk::{WebContextExt, WebViewExt, WebsiteDataManagerExt, WebsiteDataTypes};
+            let manager = view.inner().context().and_then(|context| context.website_data_manager());
+            if let Some(manager) = manager {
+                manager.clear(WebsiteDataTypes::ALL, gtk::glib::TimeSpan::from_seconds(0), None::<&gtk::gio::Cancellable>, move |result| {
+                    let _ = tx.send(result.map_err(|error|error.to_string()));
+                });
+            } else { let _ = tx.send(Err("Instance storage manager unavailable".into())); }
+        }
+    }).map_err(|e|e.to_string())?;
+    tokio::time::timeout(std::time::Duration::from_secs(30), rx)
+        .await
+        .map_err(|_| "Clearing the instance session timed out".to_owned())?
+        .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub fn report_instance_user(
     app: AppHandle,

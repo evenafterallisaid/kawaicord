@@ -748,7 +748,7 @@ fn main() {
                     let timeout = if std::env::args().any(|a| a == "--background-test") {
                         430
                     } else if std::env::args().any(|a| a == "--integration-test") {
-                        180
+                        300
                     } else {
                         90
                     };
