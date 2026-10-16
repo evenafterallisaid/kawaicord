@@ -85,3 +85,9 @@ jobs:
       - name: live discord startup with all three mods on linux
         if: matrix.platform == 'linux'
         run: xvfb-run -a node scripts/smoke-native.mjs "${{ matrix.binary }}"
+      - name: settings, cloud configuration, and instance isolation
+        if: matrix.platform != 'linux'
+        run: node scripts/smoke-native.mjs "${{ matrix.binary }}" --integration
+      - name: settings, cloud configuration, and instance isolation on linux
+        if: matrix.platform == 'linux'
+        run: xvfb-run -a node scripts/smoke-native.mjs "${{ matrix.binary }}" --integration

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-report-instance-user"
+description = "Enables the report_instance_user command without any pre-configured scope."
+commands.allow = ["report_instance_user"]
+
+[[permission]]
+identifier = "deny-report-instance-user"
+description = "Denies the report_instance_user command without any pre-configured scope."
+commands.deny = ["report_instance_user"]

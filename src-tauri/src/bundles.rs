@@ -1,4 +1,5 @@
 use crate::config::{self, ClientMod};
+use base64::Engine;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path, sync::OnceLock, time::Duration};
@@ -21,6 +22,36 @@ pub fn plausible(content: &str, css: bool) -> bool {
         && content.len() < 16 * 1024 * 1024
         && !prefix.contains("<!doctype html")
         && !prefix.contains("<html")
+}
+pub fn patch_bundle(source: &str) -> String {
+    const BROKEN_LOGO: &str =
+        "https://github.com/ImHisako/ImHisako/blob/main/Images/Illegalcord.png?raw=true";
+    let mut patched = patch_restarts(source).replacen(
+        "pluginHelpers:{}",
+        "pluginHelpers:(window.__kawaicordPluginHelpers??{})",
+        1,
+    );
+    let icons: std::collections::HashMap<String, String> =
+        serde_json::from_str(include_str!("../../native-data/mod-icons.json")).unwrap();
+    for (url, data) in icons {
+        patched = patched.replace(&url, &data);
+    }
+    if !patched.contains(BROKEN_LOGO) {
+        return patched;
+    }
+    let logo = format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD
+            .encode(include_bytes!("../../native-data/illegalcord.png"))
+    );
+    format!(
+        "window.__kawaicordIllegalcordLogo={};{}",
+        serde_json::to_string(&logo).unwrap(),
+        patched.replace(
+            &format!("\"{BROKEN_LOGO}\""),
+            "window.__kawaicordIllegalcordLogo"
+        )
+    )
 }
 pub fn patch_restarts(source: &str) -> String {
     static RE: OnceLock<Regex> = OnceLock::new();
@@ -68,12 +99,12 @@ pub fn initialization(
     let shelter = read_cache(&profile.join("bundles/shelter.js"), false)
         .unwrap_or_else(|| SHELTER.to_owned());
     let bootstrap = include_str!("../../web-dist/bootstrap.js");
-    let settings = r#"const SHELTER_INJECTOR_PLUGINS={};const SHELTER_INJECTOR_SETTINGS=[['divider'],['header','Kawaicord'],['section','kawaicord','Settings',()=>{const d=document.createElement('div');d.style.padding='24px';const b=document.createElement('button');b.textContent='Open Kawaicord Settings';b.onclick=()=>window.kawaicord.openSettings();d.append(b);return d;}]];"#;
+    let settings = r#"const SHELTER_INJECTOR_PLUGINS={};const SHELTER_INJECTOR_SETTINGS=[['divider'],['header','Kawaicord'],['section','kawaicord','Settings',()=>window.__kawaicordSettingsPage()]];"#;
     let runtime = serde_json::json!({"activeMod":mod_, "safeMode":safe, "config":config,"version":env!("CARGO_PKG_VERSION"),"platform":std::env::consts::OS});
     // user scripts execute at document start in the page's main world. the mod
     // remains at global scope; no eval, network fetch, or async ipc races it.
-    let origin_guard = "if(location.origin==='https://discord.com'&&window===window.top){\n";
-    Ok(format!("{origin_guard}window.__KAWAICORD_BOOT__={runtime};\n{bootstrap}\n(()=>{{{settings}\n{shelter}\n}})();\n{}\nwindow.__kawaicordNativeStart?.({});\n}}", if safe {String::new()} else {format!("{}\n;globalThis.Vencord=Vencord;",patch_restarts(&js))}, serde_json::to_string(&css).map_err(|e|e.to_string())?))
+    let origin_guard = "if(['https://discord.com','https://ptb.discord.com','https://canary.discord.com'].includes(location.origin)&&window===window.top){\n";
+    Ok(format!("{origin_guard}window.__KAWAICORD_BOOT__={runtime};\n{bootstrap}\n(()=>{{{settings}\n{shelter}\n}})();\n{}\nwindow.__kawaicordNativeStart?.({});\n}}", if safe {String::new()} else {format!("{}\n;globalThis.Vencord=Vencord;",patch_bundle(&js))}, serde_json::to_string(&css).map_err(|e|e.to_string())?))
 }
 async fn download(client: &reqwest::Client, url: &str, css: bool) -> Result<String, String> {
     let mut response = client
@@ -189,6 +220,12 @@ mod tests {
         assert!(!plausible("<!doctype html>", false));
         assert!(!plausible("not found", false));
         assert!(plausible(VENCORD, false));
+    }
+    #[test]
+    fn illegalcord_logo_is_bundled_instead_of_a_github_html_page() {
+        let patched = patch_bundle(source(ClientMod::Illegalcord).0);
+        assert!(!patched.contains("github.com/ImHisako/ImHisako/blob/main/Images/Illegalcord.png"));
+        assert!(patched.contains("data:image/png;base64,iVBORw0KGgo"));
     }
     #[test]
     fn unrelated_reload_is_preserved() {

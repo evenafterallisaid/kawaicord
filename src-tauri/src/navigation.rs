@@ -15,7 +15,11 @@ pub fn embedded(url: &Url) -> bool {
         return false;
     }
     url.host_str().is_some_and(|host| {
-        host == "discord.com" || host == "hcaptcha.com" || host.ends_with(".hcaptcha.com")
+        matches!(
+            host,
+            "discord.com" | "ptb.discord.com" | "canary.discord.com"
+        ) || host == "hcaptcha.com"
+            || host.ends_with(".hcaptcha.com")
     })
 }
 

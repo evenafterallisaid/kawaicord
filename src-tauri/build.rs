@@ -1,5 +1,12 @@
 fn main() {
     let commands = &[
+        "list_instances",
+        "open_instance",
+        "close_instance",
+        "close_all_instances",
+        "clear_instance_session",
+        "report_instance_user",
+        "cloud_request",
         "show_discord",
         "open_settings",
         "reload_discord",

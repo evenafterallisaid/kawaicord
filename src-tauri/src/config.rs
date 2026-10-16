@@ -28,6 +28,7 @@ impl ClientMod {
 pub struct Config {
     pub active_mod: ClientMod,
     pub performance_mode: bool,
+    pub static_nameplates: bool,
     pub rich_presence: bool,
     pub detect_games: bool,
     pub tray_enabled: bool,
@@ -42,6 +43,7 @@ impl Default for Config {
         Self {
             active_mod: ClientMod::Vencord,
             performance_mode: true,
+            static_nameplates: cfg!(target_os = "macos"),
             rich_presence: true,
             detect_games: false,
             tray_enabled: true,

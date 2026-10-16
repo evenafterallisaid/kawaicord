@@ -1,7 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod bundles;
+mod cloud;
 mod config;
+mod diagnostics;
 mod games;
+mod instances;
 mod navigation;
 mod rpc;
 mod updater;
@@ -74,10 +77,13 @@ impl AppState {
     }
 }
 fn trusted(window: &WebviewWindow) -> bool {
-    window.label() == "main"
-        && window
-            .url()
-            .is_ok_and(|u| u.scheme() == "https" && u.host_str() == Some("discord.com"))
+    (window.label() == "main" || window.label().starts_with("instance-"))
+        && window.url().is_ok_and(|u| {
+            u.scheme() == "https"
+                && u.host_str().is_some_and(|h| {
+                    matches!(h, "discord.com" | "ptb.discord.com" | "canary.discord.com")
+                })
+        })
 }
 fn local(window: &WebviewWindow) -> Result<(), String> {
     if window.label() == "settings"
@@ -124,11 +130,35 @@ async fn show_discord(app: AppHandle, window: WebviewWindow) -> Result<(), Strin
     window.close().map_err(|e| e.to_string())
 }
 #[tauri::command]
-async fn open_settings(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
+async fn open_settings(
+    app: AppHandle,
+    window: WebviewWindow,
+    fallback: Option<bool>,
+) -> Result<(), String> {
     either(&window)?;
-    settings_window(&app)
+    if fallback.unwrap_or(false) {
+        settings_fallback(&app)
+    } else {
+        settings_window(&app)
+    }
 }
 fn settings_window(app: &AppHandle) -> Result<(), String> {
+    let integrated = app
+        .state::<AppState>()
+        .runtime
+        .lock()
+        .is_ok_and(|r| r.ready && !r.safe_mode);
+    if integrated {
+        if let Some(w) = app.get_webview_window("main") {
+            show(app);
+            return w
+                .eval("window.kawaicord.openSettings()")
+                .map_err(|e| e.to_string());
+        }
+    }
+    settings_fallback(app)
+}
+fn settings_fallback(app: &AppHandle) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("settings") {
         w.show().map_err(|e| e.to_string())?;
         return w.set_focus().map_err(|e| e.to_string());
@@ -146,7 +176,12 @@ fn settings_window(app: &AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn reload_discord(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
     either(&window)?;
-    app.get_webview_window("main")
+    let target = if trusted(&window) {
+        window.label()
+    } else {
+        "main"
+    };
+    app.get_webview_window(target)
         .ok_or("Discord window is closed")?
         .reload()
         .map_err(|e| e.to_string())
@@ -163,7 +198,7 @@ async fn restart_app(app: AppHandle, window: WebviewWindow) -> Result<(), String
 }
 #[tauri::command]
 async fn restart_recovery(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
-    local(&window)?;
+    either(&window)?;
     config::save_json(
         &app.state::<AppState>().profile.join("safe-mode.json"),
         &true,
@@ -176,7 +211,7 @@ fn get_settings(
     window: WebviewWindow,
     state: State<AppState>,
 ) -> Result<serde_json::Value, String> {
-    local(&window)?;
+    either(&window)?;
     Ok(
         serde_json::json!({"config":*state.config.lock().map_err(|e|e.to_string())?,"runtime":*state.runtime.lock().map_err(|e|e.to_string())?,"updater":{"configured":true,"message":"Native updates use signed release packages. Check manually below."}}),
     )
@@ -201,7 +236,7 @@ async fn save_config(
     state: State<'_, AppState>,
     config: Config,
 ) -> Result<Config, String> {
-    local(&window)?;
+    either(&window)?;
     let old = state.config.lock().map_err(|e| e.to_string())?.clone();
     if old.start_at_login != config.start_at_login {
         let manager = app.autolaunch();
@@ -232,7 +267,7 @@ async fn save_config(
 }
 #[tauri::command]
 async fn refresh_mods(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
-    local(&window)?;
+    either(&window)?;
     refresh(&app, true).await
 }
 async fn refresh(app: &AppHandle, force: bool) -> Result<(), String> {
@@ -260,6 +295,24 @@ fn report_runtime(
     if !trusted(&window) {
         return Err("Untrusted renderer".into());
     }
+    if window.label().starts_with("instance-") {
+        state.log(&format!(
+            "Instance {}: ready={} modules={}",
+            window.label(),
+            status.ready,
+            status.modules
+        ));
+        if let Some(instance) = app
+            .state::<instances::Instances>()
+            .0
+            .lock()
+            .map_err(|e| e.to_string())?
+            .get_mut(window.label())
+        {
+            instance.ready = status.ready;
+        }
+        return Ok(());
+    }
     state.log(&format!(
         "Renderer: {} Shelter={} modules={} media={} display={} ready={}",
         status.active_mod.id(),
@@ -272,6 +325,10 @@ fn report_runtime(
     config::save_json(&state.profile.join("runtime.json"), &status)?;
     *state.runtime.lock().map_err(|e| e.to_string())? = status.clone();
     if state.smoke {
+        if std::env::args().any(|a| a == "--integration-test") && status.ready {
+            tauri::async_runtime::spawn(diagnostics::run(app.clone(), window.clone()));
+            return Ok(());
+        }
         if std::env::args().any(|a| a == "--background-test")
             && status.ready
             && status.background_elapsed.is_none()
@@ -363,17 +420,17 @@ fn notify(
 }
 #[tauri::command]
 async fn check_update(app: AppHandle, window: WebviewWindow) -> Result<updater::Status, String> {
-    local(&window)?;
+    either(&window)?;
     updater::check(&app).await
 }
 #[tauri::command]
 async fn install_update(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
-    local(&window)?;
+    either(&window)?;
     updater::install(&app).await
 }
 #[tauri::command]
 async fn open_releases(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
-    local(&window)?;
+    either(&window)?;
     app.opener()
         .open_url(
             "https://github.com/evenafterallisaid/kawaicord/releases",
@@ -385,6 +442,22 @@ fn open_external(app: &AppHandle, url: &url::Url) {
     if matches!(url.scheme(), "https" | "http" | "mailto") {
         let _ = app.opener().open_url(url.as_str(), None::<&str>);
     }
+}
+fn navigate_discord(window: &WebviewWindow, url: url::Url) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    window
+        .with_webview(move |view| unsafe {
+            use objc2::{msg_send, runtime::AnyObject};
+            use objc2_foundation::{ns_string, NSNumber};
+            let inner = view.inner() as *mut AnyObject;
+            let configuration: *mut AnyObject = msg_send![inner, configuration];
+            let preferences: *mut AnyObject = msg_send![configuration, preferences];
+            let yes = NSNumber::numberWithBool(true);
+            let _: () =
+                msg_send![preferences,setValue:&*yes,forKey:ns_string!("mediaDevicesEnabled")];
+        })
+        .map_err(|e| e.to_string())?;
+    window.navigate(url).map_err(|e| e.to_string())
 }
 fn build_discord(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let state = app.state::<AppState>();
@@ -425,10 +498,12 @@ fn build_discord(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         tauri::webview::NewWindowResponse::Deny
     })
     .on_permission_request(|view, _| {
-        if view
-            .url()
-            .is_ok_and(|u| u.scheme() == "https" && u.host_str() == Some("discord.com"))
-        {
+        if view.url().is_ok_and(|u| {
+            u.scheme() == "https"
+                && u.host_str().is_some_and(|h| {
+                    matches!(h, "discord.com" | "ptb.discord.com" | "canary.discord.com")
+                })
+        }) {
             tauri::webview::PermissionResponse::Default
         } else {
             tauri::webview::PermissionResponse::Deny
@@ -441,20 +516,7 @@ fn build_discord(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     }
     let window = builder.build()?;
     #[cfg(target_os = "macos")]
-    {
-        window.with_webview(move |view| unsafe {
-            use objc2::{msg_send, runtime::AnyObject};
-            use objc2_foundation::{ns_string, NSNumber};
-            let inner = view.inner() as *mut AnyObject;
-            let configuration: *mut AnyObject = msg_send![inner, configuration];
-            let preferences: *mut AnyObject = msg_send![configuration, preferences];
-            let yes = NSNumber::numberWithBool(true);
-            let _: () =
-                msg_send![preferences,setValue:&*yes,forKey:ns_string!("mediaDevicesEnabled")];
-        })?;
-        // finish the native callback before dispatching another tauri operation.
-        window.navigate("https://discord.com/app".parse()?)?;
-    }
+    navigate_discord(&window, "https://discord.com/app".parse()?)?;
     if saved.maximized {
         let _ = window.maximize();
     }
@@ -551,14 +613,27 @@ fn desktop(app: &AppHandle) -> tauri::Result<()> {
 }
 fn main() {
     env_logger::init();
-    let builder = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| show(app)))
+    let builder = tauri::Builder::default();
+    let builder = if std::env::args().any(|a| a == "--smoke-test") {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(|app, _, _| show(app)))
+    };
+    let builder = builder
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updater::Updates::default())
+        .manage(instances::Instances::default())
         .invoke_handler(tauri::generate_handler![
+            cloud::cloud_request,
+            instances::list_instances,
+            instances::open_instance,
+            instances::close_instance,
+            instances::close_all_instances,
+            instances::clear_instance_session,
+            instances::report_instance_user,
             show_discord,
             open_settings,
             reload_discord,
@@ -672,6 +747,8 @@ fn main() {
                 tauri::async_runtime::spawn(async move {
                     let timeout = if std::env::args().any(|a| a == "--background-test") {
                         430
+                    } else if std::env::args().any(|a| a == "--integration-test") {
+                        180
                     } else {
                         90
                     };

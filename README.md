@@ -15,8 +15,11 @@ discord, shelter, and your choice of vencord, equicord, or illegalcord. now with
 - mod updates download after startup. complete cached pairs and installer copies provide fallbacks.
 - closing the window keeps discord live by default. calls, messages, audio, and notifications are never deliberately suspended or unloaded to save memory.
 - background performance mode pauses decorative animations and image painting while hidden. it restores them when shown.
+- on macos, static nameplates preserve transparency where webkit cannot composite transparent vp9 videos. the setting can be changed inside kawaicord settings.
+- illegalcord’s multi-instance helper opens native windows with isolated sessions. saved isolated sessions on macos require macos 14 or newer; temporary sessions work on older versions. detached windows work on all three platforms, and grouped native tabs are available on macos.
+- official equicord and vencord cloud requests use a restricted native bridge, so discord’s page policy does not block oauth setup. cloud authorization still happens through the mod’s regular discord dialog.
 - native rpc accepts activity from local applications without a node sidecar. automatic game detection is optional and off by default; enabling it checks executable paths every 30 seconds.
-- settings use a small local window that is destroyed when closed. discord has a restricted native bridge with no filesystem or shell access.
+- settings live inside discord’s own settings sidebar and use shelter’s discord-style controls and your current theme. a local recovery window is available if discord cannot initialize. the native bridge exposes typed app actions without filesystem or shell access.
 - native releases use signed updater payloads. automatic checks never install an update or restart a call on their own.
 
 using a system webview removes the bundled chromium and node runtime. discord, client mods, and the webview still use memory. actual savings depend on your platform, account, plugins, and active calls. a small host process alone is not a measurement of total app memory.
@@ -39,7 +42,7 @@ this is an unofficial discord client. upstream client mods keep their own licens
 
 ## settings and recovery
 
-click the kawaicord button at the bottom right, use the native settings menu, or press `cmd+,` / `ctrl+,`.
+open discord settings, then choose **kawaicord → settings**. the native settings menu and `cmd+,` / `ctrl+,` open the same page.
 
 choose vencord, equicord, or illegalcord, then save and restart. exactly one client mod loads alongside shelter. the mods' restart buttons and the usual reload shortcuts use the native host.
 

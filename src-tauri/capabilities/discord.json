@@ -1,1 +1,39 @@
-{"identifier":"discord","description":"Narrow bridge for Discord; no files, shell, config writes, or updates","windows":["main"],"local":false,"remote":{"urls":["https://discord.com/*"]},"permissions":["allow-open-settings","allow-reload-discord","allow-restart-app","allow-report-runtime","allow-set-unread","allow-notification-permission","allow-notify"]}
+{
+  "identifier": "discord",
+  "description": "Discord settings and desktop integration; no filesystem or shell access",
+  "windows": [
+    "main",
+    "instance-*"
+  ],
+  "local": false,
+  "remote": {
+    "urls": [
+      "https://discord.com/*",
+      "https://ptb.discord.com/*",
+      "https://canary.discord.com/*"
+    ]
+  },
+  "permissions": [
+    "allow-open-settings",
+    "allow-reload-discord",
+    "allow-restart-app",
+    "allow-report-runtime",
+    "allow-set-unread",
+    "allow-notification-permission",
+    "allow-notify",
+    "allow-restart-recovery",
+    "allow-get-settings",
+    "allow-save-config",
+    "allow-refresh-mods",
+    "allow-check-update",
+    "allow-install-update",
+    "allow-open-releases",
+    "allow-list-instances",
+    "allow-open-instance",
+    "allow-close-instance",
+    "allow-close-all-instances",
+    "allow-clear-instance-session",
+    "allow-report-instance-user",
+    "allow-cloud-request"
+  ]
+}

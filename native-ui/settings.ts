@@ -7,6 +7,7 @@ async function action(button:HTMLButtonElement,fn:()=>Promise<unknown>){button.d
 let config:Config;
 const flags:Array<[keyof Config,string,string]>=[
   ['performanceMode','Background performance mode','Pause decorative animation and avatar painting while hidden.'],
+  ['staticNameplates','Use static nameplates','Preserve colors and transparency when the webview cannot render transparent nameplate videos.'],
   ['richPresence','Local Rich Presence','Accept activity from games and applications through native Discord RPC.'],
   ['detectGames','Detect running games','Optional native process check every 30 seconds. Off by default to reduce background work.'],
   ['notifications','Desktop notifications','Allow Discord notifications through the native notification service.'],
@@ -18,7 +19,7 @@ const flags:Array<[keyof Config,string,string]>=[
 ];
 async function load(){
   const data=await invoke<{config:Config;runtime:RuntimeStatus;updater:{configured:boolean;message:string}}>('get_settings');config=data.config;
-  get('version').textContent=`${data.runtime.version} · Rust + Tauri · ${data.runtime.platform}`;
+  get('version').textContent=`Version ${data.runtime.version}`;
   get('runtime').textContent=data.runtime.safeMode?'Recovery mode':data.runtime.ready?'Connected':'Starting Discord';
   get('mod-status').textContent=data.runtime.error??`${data.runtime.modules} Discord modules initialized`;
   get<HTMLSelectElement>('mod').value=config.activeMod;
@@ -28,7 +29,7 @@ async function load(){
   for(const [key,title,description] of flags){
     const label=document.createElement('label');label.className='option';const text=document.createElement('div');
     const heading=document.createElement('span');heading.textContent=title;const detail=document.createElement('small');detail.textContent=description;text.append(heading,detail);
-    const input=document.createElement('input');input.type='checkbox';input.checked=config[key]===true;
+    const input=document.createElement('input');input.type='checkbox';input.setAttribute('role','switch');input.checked=config[key]===true;
     input.onchange=()=>void action(input as unknown as HTMLButtonElement,async()=>{try{config=await invoke<Config>('save_config',{config:{...config,[key]:input.checked}});}catch(e){input.checked=!input.checked;throw e;}});
     label.append(text,input);options.append(label);
   }
