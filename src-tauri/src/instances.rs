@@ -328,13 +328,18 @@ pub async fn clear_instance_session(
         temporary.destroy().map_err(|e| e.to_string())?;
     }
     let dir = profile(&app, &id);
-    for attempt in 0..30 {
+    for attempt in 0..100 {
         if !dir.exists() {
             return Ok(());
         }
         match std::fs::remove_dir_all(&dir) {
             Ok(()) => return Ok(()),
-            Err(error) if attempt < 29 && error.kind() == std::io::ErrorKind::PermissionDenied => {
+            Err(error)
+                if attempt < 99
+                    && (error.kind() == std::io::ErrorKind::PermissionDenied
+                        || (cfg!(target_os = "windows")
+                            && matches!(error.raw_os_error(), Some(32 | 33)))) =>
+            {
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
             Err(error) => return Err(error.to_string()),
