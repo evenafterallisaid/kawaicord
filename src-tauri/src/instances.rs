@@ -385,7 +385,7 @@ async fn clear_native_store(window: &WebviewWindow) -> Result<(), String> {
         }
         #[cfg(target_os = "linux")]
         {
-            use webkit2gtk::{WebContextExt, WebViewExt, WebsiteDataManagerExt, WebsiteDataTypes};
+            use webkit2gtk::{WebContextExt, WebViewExt, WebsiteDataManagerExtManual, WebsiteDataTypes};
             let manager = view.inner().context().and_then(|context| context.website_data_manager());
             if let Some(manager) = manager {
                 manager.clear(WebsiteDataTypes::ALL, gtk::glib::TimeSpan::from_seconds(0), None::<&gtk::gio::Cancellable>, move |result| {
