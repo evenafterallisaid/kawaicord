@@ -2,6 +2,7 @@ kawaicord 2.0.0. the coffee finally got a release build.
 
 - replaced the electron host with rust, tauri, and a small typescript bridge on macos, windows, and linux. no bundled chromium or node sidecar.
 - fixed macos identifying itself as an unknown webkit client, which made discord reject voice calls as an unsupported browser. the app now reports the installed safari version and allows incoming audio playback.
+- added the microphone and camera entitlements to signed mac builds. without them, macos denied microphone access before it could show a permission prompt.
 - added a local audio transport diagnostic in settings. it uses synthetic audio, keeps the microphone closed, and sends nothing to another person.
 - cleaned up settings into background, desktop, update, and recovery sections using discord-style controls. button labels stay inside their buttons.
 - saved first-install defaults explicitly. discord stays live when hidden, notifications and local rpc are on, game scanning and login startup are off. existing preferences survive upgrades, and broken configuration files are backed up before recovery.
@@ -10,7 +11,7 @@ kawaicord 2.0.0. the coffee finally got a release build.
 - added illegalcord alongside vencord and equicord, with shelter loaded separately. restored the actual illegalcord and cloud logos, native multi-instance sessions, and official cloud oauth configuration requests.
 - kept captcha frames inside discord, removed the floating settings button, and gave macos its native titlebar and traffic lights.
 - retained the macos static nameplate fallback for transparent video compositing. animation can be enabled in settings if your webview handles it correctly.
-- packaged universal macos installers, windows x64 installers, and linux x64 deb and appimage builds. every platform must pass build, regression, live mod startup, settings, cloud configuration, and instance-isolation checks before publication. macos also checks packaged audio transport.
+- packaged universal macos installers, windows x64 installers, and linux x64 deb and appimage builds. every platform must pass build, regression, live mod startup, settings, cloud configuration, and instance-isolation checks before publication. each platform also checks discord’s voice engine and encrypted media apis; macos verifies signed capture entitlements. local audio loopback and a real macos call are checked separately from headless ci.
 
 upgrading from 1.x requires a downloaded installer and a new sign-in. the old profile is retained separately. close the old client first to avoid duplicate notifications and competing rpc listeners. native beta installations keep their existing native profile.
 

@@ -95,7 +95,7 @@ installers go under `src-tauri/target/`, in the release bundle directory for the
 npm run tauri -- build --config '{"bundle":{"createUpdaterArtifacts":false}}'
 ```
 
-`npm test` checks typescript, rust formatting, regression tests, and clippy. `npm run test:discord -- /absolute/path/to/kawaicord` opens isolated sign-in sessions for all three client mods, reports actual initialization, and exits. linux needs a graphical session or `xvfb-run -a`. it never uses an existing discord login. add `--integration` to check settings layout, cloud configuration, and separate instance storage, or `--media` to send synthetic audio through a local peer connection. the macos pipeline runs this audio test against the packaged app and checks its safari identification.
+`npm test` checks typescript, rust formatting, regression tests, and clippy. `npm run test:discord -- /absolute/path/to/kawaicord` opens isolated sign-in sessions for all three client mods, reports actual initialization, and exits. linux needs a graphical session or `xvfb-run -a`. it never uses an existing discord login. add `--integration` to check settings layout, cloud configuration, and separate instance storage, or `--media` to send synthetic audio through a local peer connection. the pipeline checks discord’s voice engine and encrypted media apis in each packaged app; macos also checks safari identification and signed microphone/camera entitlements. `--media` requires an interactive desktop with local network access. hosted mac runners may not expose usable local ice candidates, so ci uses `--media-preflight` rather than claiming a successful audio session.
 
 ## releases
 

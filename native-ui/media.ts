@@ -9,7 +9,7 @@ export interface MediaReport {
   error?: string;
 }
 
-export async function testAudioTransport(): Promise<MediaReport> {
+export function mediaCapabilities(): MediaReport {
   const report: MediaReport = {
     ok: false,
     userAgent: navigator.userAgent,
@@ -17,6 +17,17 @@ export async function testAudioTransport(): Promise<MediaReport> {
     encodedTransforms: typeof (window as any).RTCRtpScriptTransform === 'function'
       || typeof (window as any).RTCRtpSender?.prototype.createEncodedStreams === 'function'
   };
+  const webpack = window.Vencord?.Webpack;
+  const engine = (webpack as any)?.Common?.MediaEngineStore ?? webpack?.findByProps?.('isSupported', 'getInputVolume');
+  report.discordVoiceSupported = typeof engine?.isSupported === 'function' ? engine.isSupported() : undefined;
+  report.ok = report.peerConnection && report.encodedTransforms && report.discordVoiceSupported === true;
+  if (!report.ok) report.error = 'Discord voice or encrypted media APIs are unavailable in this webview';
+  return report;
+}
+
+export async function testAudioTransport(): Promise<MediaReport> {
+  const report = mediaCapabilities();
+  report.ok = false;
   let context: AudioContext | undefined;
   let sender: RTCPeerConnection | undefined;
   let receiver: RTCPeerConnection | undefined;
@@ -25,10 +36,8 @@ export async function testAudioTransport(): Promise<MediaReport> {
   let stream: MediaStream | undefined;
   let timeout: number | undefined;
   try {
-    const webpack = window.Vencord?.Webpack;
-    const engine = (webpack as any)?.Common?.MediaEngineStore ?? webpack?.findByProps?.('isSupported', 'getInputVolume');
-    report.discordVoiceSupported = typeof engine?.isSupported === 'function' ? engine.isSupported() : undefined;
     if (report.discordVoiceSupported === false) throw new Error('Discord does not recognize voice support in this webview');
+    if (!report.encodedTransforms) throw new Error('Encrypted media APIs are unavailable in this webview');
     if (!report.peerConnection) throw new Error('WebRTC is unavailable in this webview');
     context = new AudioContext();
     report.audioContext = context.state;
@@ -102,3 +111,4 @@ export async function testAudioTransport(): Promise<MediaReport> {
   return report;
 }
 (window as any).__kawaicordTestAudio = testAudioTransport;
+(window as any).__kawaicordMediaCapabilities = mediaCapabilities;

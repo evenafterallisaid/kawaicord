@@ -77,14 +77,20 @@ jobs:
         if: matrix.platform == 'macos'
         run: |
           codesign --verify --deep --strict src-tauri/target/universal-apple-darwin/release/bundle/macos/Kawaicord.app
+          codesign -d --entitlements - --xml src-tauri/target/universal-apple-darwin/release/bundle/macos/Kawaicord.app > "$RUNNER_TEMP/kawaicord-entitlements.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.device.audio-input' "$RUNNER_TEMP/kawaicord-entitlements.plist")" = true
+          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.device.camera' "$RUNNER_TEMP/kawaicord-entitlements.plist")" = true
           lipo -archs "${{ matrix.binary }}"
           hdiutil verify src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
       - name: live discord startup with all three mods
         if: matrix.platform != 'linux'
         run: node scripts/smoke-native.mjs "${{ matrix.binary }}"
-      - name: packaged macos audio transport and browser identification
-        if: matrix.platform == 'macos'
-        run: node scripts/smoke-native.mjs "${{ matrix.binary }}" --media
+      - name: packaged discord voice engine and encrypted media capabilities
+        if: matrix.platform != 'linux'
+        run: node scripts/smoke-native.mjs "${{ matrix.binary }}" --media-preflight
+      - name: packaged discord voice engine and encrypted media capabilities on linux
+        if: matrix.platform == 'linux'
+        run: xvfb-run -a node scripts/smoke-native.mjs "${{ matrix.binary }}" --media-preflight
       - name: live discord startup with all three mods on linux
         if: matrix.platform == 'linux'
         run: xvfb-run -a node scripts/smoke-native.mjs "${{ matrix.binary }}"

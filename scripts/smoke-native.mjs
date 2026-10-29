@@ -9,14 +9,15 @@ const binary = resolve(process.argv[2] ?? (process.platform === 'darwin'
   : `src-tauri/target/release/kawaicord${process.platform === 'win32' ? '.exe' : ''}`));
 const backgroundTest = process.argv.includes('--background');
 const integrationTest = process.argv.includes('--integration');
-const mediaTest = process.argv.includes('--media');
+const mediaPreflight = process.argv.includes('--media-preflight');
+const mediaTest = process.argv.includes('--media') || mediaPreflight;
 for (const activeMod of integrationTest ? ['illegalcord'] : backgroundTest || mediaTest ? ['vencord'] : ['vencord', 'equicord', 'illegalcord']) {
   const profile = await mkdtemp(join(tmpdir(), 'kawaicord-smoke-'));
   let failed = false;
   try {
     await writeFile(join(profile, 'config.json'), JSON.stringify({ activeMod, richPresence: false,
       autoUpdateMods: false, autoUpdateApp: false, notifications: false, startAtLogin: false }));
-    const child = spawn(binary, ['--smoke-test', '--profile', profile, ...(backgroundTest ? ['--background-test'] : []), ...(integrationTest ? ['--integration-test'] : []), ...(mediaTest ? ['--media-test'] : [])], {
+    const child = spawn(binary, ['--smoke-test', '--profile', profile, ...(backgroundTest ? ['--background-test'] : []), ...(integrationTest ? ['--integration-test'] : []), ...(mediaTest ? ['--media-test'] : []), ...(mediaPreflight ? ['--media-preflight'] : [])], {
       stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WEBKIT_DISABLE_DMABUF_RENDERER: '1' }
     });
     let output = '';
@@ -53,7 +54,8 @@ for (const activeMod of integrationTest ? ['illegalcord'] : backgroundTest || me
       assert.equal(media.ok, true, JSON.stringify(media));
       assert.equal(media.peerConnection, true);
       assert.equal(media.discordVoiceSupported, true, 'Discord must select a supported voice engine');
-      assert.ok(media.receivedBytes > 0);
+      assert.equal(media.encodedTransforms, true);
+      if (!mediaPreflight) assert.ok(media.receivedBytes > 0);
       if (process.platform === 'darwin') assert.match(media.userAgent, /Version\/[\d.]+ Safari\//);
       console.log(JSON.stringify(media));
     }

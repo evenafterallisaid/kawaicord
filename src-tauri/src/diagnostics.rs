@@ -184,6 +184,9 @@ async fn check(app: &AppHandle, main: &WebviewWindow) -> Result<Value, String> {
 
 pub async fn run_media(app: AppHandle, main: WebviewWindow) {
     let result = async {
+        if std::env::args().any(|arg| arg == "--media-preflight") {
+            return evaluate(&main, "window.__kawaicordMediaCapabilities()").await;
+        }
         evaluate(&main, "(window.__kawaicordTestAudio().then(report=>window.__kawaicordMediaResult=report),true)").await?;
         for _ in 0..25 {
             let value = evaluate(&main,"window.__kawaicordMediaResult??null").await?;
