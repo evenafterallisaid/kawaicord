@@ -9,13 +9,14 @@ const binary = resolve(process.argv[2] ?? (process.platform === 'darwin'
   : `src-tauri/target/release/kawaicord${process.platform === 'win32' ? '.exe' : ''}`));
 const backgroundTest = process.argv.includes('--background');
 const integrationTest = process.argv.includes('--integration');
-for (const activeMod of integrationTest ? ['illegalcord'] : backgroundTest ? ['vencord'] : ['vencord', 'equicord', 'illegalcord']) {
+const mediaTest = process.argv.includes('--media');
+for (const activeMod of integrationTest ? ['illegalcord'] : backgroundTest || mediaTest ? ['vencord'] : ['vencord', 'equicord', 'illegalcord']) {
   const profile = await mkdtemp(join(tmpdir(), 'kawaicord-smoke-'));
   let failed = false;
   try {
     await writeFile(join(profile, 'config.json'), JSON.stringify({ activeMod, richPresence: false,
       autoUpdateMods: false, autoUpdateApp: false, notifications: false, startAtLogin: false }));
-    const child = spawn(binary, ['--smoke-test', '--profile', profile, ...(backgroundTest ? ['--background-test'] : []), ...(integrationTest ? ['--integration-test'] : [])], {
+    const child = spawn(binary, ['--smoke-test', '--profile', profile, ...(backgroundTest ? ['--background-test'] : []), ...(integrationTest ? ['--integration-test'] : []), ...(mediaTest ? ['--media-test'] : [])], {
       stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WEBKIT_DISABLE_DMABUF_RENDERER: '1' }
     });
     let output = '';
@@ -33,8 +34,13 @@ for (const activeMod of integrationTest ? ['illegalcord'] : backgroundTest ? ['v
       try { integration = JSON.parse(await readFile(join(profile, 'integration.json'), 'utf8')); }
       catch { integration = { ok: false, error: 'no integration report' }; }
     }
+    let media;
+    if (mediaTest) {
+      try { media = JSON.parse(await readFile(join(profile, 'media.json'), 'utf8')); }
+      catch { media = { ok: false, error: 'no media report' }; }
+    }
     const log = code === 0 ? '' : await readFile(join(profile, 'kawaicord.log'), 'utf8').catch(() => '');
-    assert.equal(code, 0, `${activeMod}: ${JSON.stringify(status)}\n${JSON.stringify(integration ?? {})}\n${log}\n${output}`);
+    assert.equal(code, 0, `${activeMod}: ${JSON.stringify(status)}\n${JSON.stringify(integration ?? media ?? {})}\n${log}\n${output}`);
     assert.equal(status.activeMod, activeMod);
     assert.equal(status.safeMode, false);
     assert.equal(status.ready, true);
@@ -43,6 +49,13 @@ for (const activeMod of integrationTest ? ['illegalcord'] : backgroundTest ? ['v
     assert.equal(status.media, true);
     if (backgroundTest) { assert.equal(status.backgroundHidden, true); assert.ok(status.backgroundElapsed >= 370000); }
     if (integrationTest) { assert.equal(integration.ok, true, JSON.stringify(integration)); console.log(JSON.stringify(integration)); }
+    if (mediaTest) {
+      assert.equal(media.ok, true, JSON.stringify(media));
+      assert.equal(media.peerConnection, true);
+      assert.ok(media.receivedBytes > 0);
+      if (process.platform === 'darwin') assert.match(media.userAgent, /Version\/[\d.]+ Safari\//);
+      console.log(JSON.stringify(media));
+    }
     console.log(JSON.stringify(status));
   } catch (error) { failed = true; throw error; }
   finally {

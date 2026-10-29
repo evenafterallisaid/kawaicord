@@ -208,12 +208,13 @@ async fn restart_recovery(app: AppHandle, window: WebviewWindow) -> Result<(), S
 }
 #[tauri::command]
 fn get_settings(
+    app: AppHandle,
     window: WebviewWindow,
     state: State<AppState>,
 ) -> Result<serde_json::Value, String> {
     either(&window)?;
     Ok(
-        serde_json::json!({"config":*state.config.lock().map_err(|e|e.to_string())?,"runtime":*state.runtime.lock().map_err(|e|e.to_string())?,"updater":{"configured":true,"message":"Native updates use signed release packages. Check manually below."}}),
+        serde_json::json!({"config":*state.config.lock().map_err(|e|e.to_string())?,"runtime":*state.runtime.lock().map_err(|e|e.to_string())?,"updater":updater::status(&app)}),
     )
 }
 async fn configure_rpc(app: &AppHandle) {
@@ -325,6 +326,10 @@ fn report_runtime(
     config::save_json(&state.profile.join("runtime.json"), &status)?;
     *state.runtime.lock().map_err(|e| e.to_string())? = status.clone();
     if state.smoke {
+        if std::env::args().any(|a| a == "--media-test") && status.ready {
+            tauri::async_runtime::spawn(diagnostics::run_media(app.clone(), window.clone()));
+            return Ok(());
+        }
         if std::env::args().any(|a| a == "--integration-test") && status.ready {
             tauri::async_runtime::spawn(diagnostics::run(app.clone(), window.clone()));
             return Ok(());
@@ -448,9 +453,19 @@ fn navigate_discord(window: &WebviewWindow, url: url::Url) -> Result<(), String>
     window
         .with_webview(move |view| unsafe {
             use objc2::{msg_send, runtime::AnyObject};
-            use objc2_foundation::{ns_string, NSNumber};
+            use objc2_foundation::{ns_string, NSNumber, NSBundle, NSString};
             let inner = view.inner() as *mut AnyObject;
+            // wkwebview omits safari identification, which discord needs for voice support.
+            let version = NSBundle::bundleWithPath(&NSString::from_str("/Applications/Safari.app"))
+                .and_then(|bundle| bundle.objectForInfoDictionaryKey(ns_string!("CFBundleShortVersionString")))
+                .and_then(|value| value.downcast::<NSString>().ok()).map(|value| value.to_string())
+                .filter(|value| value.len() <= 32 && value.bytes().all(|byte| byte.is_ascii_digit() || byte == b'.'));
+            if let Some(version) = version {
+                let agent = NSString::from_str(&format!("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{version} Safari/605.1.15 Kawaicord/{}", env!("CARGO_PKG_VERSION")));
+                let _: () = msg_send![inner, setCustomUserAgent:&*agent];
+            }
             let configuration: *mut AnyObject = msg_send![inner, configuration];
+            let _: () = msg_send![configuration, setMediaTypesRequiringUserActionForPlayback:0usize];
             let preferences: *mut AnyObject = msg_send![configuration, preferences];
             let yes = NSNumber::numberWithBool(true);
             let _: () =
@@ -677,7 +692,7 @@ fn main() {
             let smoke = std::env::args().any(|arg| arg == "--smoke-test");
             let profile = config::profile_override().unwrap_or(app.path().app_data_dir()?);
             fs::create_dir_all(&profile)?;
-            let config: Config = config::read_json(&profile.join("config.json"));
+            let config = config::load_config(&profile.join("config.json"))?;
             let recovery: Recovery = config::read_json(&profile.join("recovery.json"));
             let requested: Option<bool> = fs::read(profile.join("safe-mode.json"))
                 .ok()

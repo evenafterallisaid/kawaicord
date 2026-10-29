@@ -181,3 +181,23 @@ async fn check(app: &AppHandle, main: &WebviewWindow) -> Result<Value, String> {
         json!({"ok":true,"separateSessionStorage":true,"clearedSessionStayedCleared":true,"temporarySessionsIsolated":true,"temporarySessionNotRestored":true,"discordSettingsRendered":true,"buttonLabelsFit":true,"oauthConfigurationLoaded":true,"nativeInstanceHelper":true}),
     )
 }
+
+pub async fn run_media(app: AppHandle, main: WebviewWindow) {
+    let result = async {
+        evaluate(&main, "(window.__kawaicordTestAudio().then(report=>window.__kawaicordMediaResult=report),true)").await?;
+        for _ in 0..25 {
+            let value = evaluate(&main,"window.__kawaicordMediaResult??null").await?;
+            if !value.is_null() { return Ok::<Value,String>(value); }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+        Err("Media test timed out".into())
+    }.await;
+    let report = result.unwrap_or_else(|error| json!({"ok":false,"error":error}));
+    let _ = super::config::save_json(
+        &app.state::<super::AppState>().profile.join("media.json"),
+        &report,
+    );
+    println!("{report}");
+    super::clean_exit(&app);
+    app.exit(if report["ok"] == true { 0 } else { 1 });
+}

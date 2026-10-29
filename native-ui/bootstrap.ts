@@ -1,3 +1,4 @@
+import './media';
 import { installCloudBridge } from './cloud';
 import { nameplateCompatibility } from './nameplates';
 import { instanceHelpers } from './instances';

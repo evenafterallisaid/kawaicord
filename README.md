@@ -6,9 +6,9 @@ discord, shelter, and your choice of vencord, equicord, or illegalcord. now with
 
 ## the native rewrite
 
-2.0 is a preview of the new native client for macos, windows, and linux. the previous electron release is available as [v1.5.2](https://github.com/evenafterallisaid/kawaicord/releases/tag/v1.5.2).
+2.0 is the native client for macos, windows, and linux. the previous electron release is available as [v1.5.2](https://github.com/evenafterallisaid/kawaicord/releases/tag/v1.5.2).
 
-- macos uses wkwebview and the real native titlebar, including the three traffic lights.
+- macos uses wkwebview and the real native titlebar, including the three traffic lights. browser identification follows the installed safari version so discord can recognize voice support.
 - windows uses the system webview2 runtime and native window controls.
 - linux uses webkitgtk 4.1, with deb and appimage builds in the same release pipeline.
 - shelter loads separately from the selected client mod, including in recovery mode.
@@ -26,7 +26,7 @@ using a system webview removes the bundled chromium and node runtime. discord, c
 
 ## install
 
-get packages from [releases](https://github.com/evenafterallisaid/kawaicord/releases). native preview releases are marked prerelease until the rewrite has had real usage across platforms.
+get packages from [releases](https://github.com/evenafterallisaid/kawaicord/releases). stable installations receive stable updates by default. experimental releases are available separately as prereleases.
 
 | system | package | requirements |
 | --- | --- | --- |
@@ -46,7 +46,11 @@ open discord settings, then choose **kawaicord → settings**. the native settin
 
 choose vencord, equicord, or illegalcord, then save and restart. exactly one client mod loads alongside shelter. the mods' restart buttons and the usual reload shortcuts use the native host.
 
-updates are checked after startup and then every six hours. open settings to check manually and choose when to install. native beta builds can receive later native prereleases; stable native builds ignore prereleases. the electron updater cannot install the native rewrite, so the initial migration uses a downloaded installer. appimage installs support native updates; deb installations should be updated with a new deb package.
+updates are checked after startup and then every six hours. open settings to check manually and choose when to install. enable **receive preview updates** to include prereleases. this is off by default on new and existing installations. release selection compares version numbers rather than publication dates, and failed installations can be retried without another check. downloads are verified before installation; automatic checks never restart the app. the electron updater cannot install the native rewrite, so the initial migration uses a downloaded installer. appimage installs support native updates; deb installations should be updated with a new deb package.
+
+first launch saves the default settings: notifications, local rpc, background drawing reduction, tray integration, and update checks are enabled. login startup and game detection are disabled. static nameplates are enabled on macos. existing preferences are retained; malformed settings are backed up before recovering defaults.
+
+**test audio transport** in settings runs a local synthetic audio loopback without opening the microphone or contacting another person. it checks transport, not a complete discord call or permission setup.
 
 recovery mode keeps shelter while skipping the client mod. use it from settings if a plugin breaks startup. a recent unclean app exit also enables recovery for that launch. slow downloads never disable a mod. on macos, a crashed web content process gets one reload, then one recovery attempt; repeated crashes stop the reload cycle and open settings.
 
@@ -91,13 +95,13 @@ installers go under `src-tauri/target/`, in the release bundle directory for the
 npm run tauri -- build --config '{"bundle":{"createUpdaterArtifacts":false}}'
 ```
 
-`npm test` checks typescript, rust formatting, regression tests, and clippy. `npm run test:discord -- /absolute/path/to/kawaicord` opens isolated sign-in sessions for all three client mods, reports actual initialization, and exits. linux needs a graphical session or `xvfb-run -a`. it never uses an existing discord login.
+`npm test` checks typescript, rust formatting, regression tests, and clippy. `npm run test:discord -- /absolute/path/to/kawaicord` opens isolated sign-in sessions for all three client mods, reports actual initialization, and exits. linux needs a graphical session or `xvfb-run -a`. it never uses an existing discord login. add `--integration` to check settings layout, cloud configuration, and separate instance storage, or `--media` to send synthetic audio through a local peer connection. the macos pipeline runs this audio test against the packaged app and checks its safari identification.
 
 ## releases
 
 `.github/workflows/native.yml` builds all three platforms. macos packages are universal, windows uses nsis, and linux publishes deb plus appimage. every package must build and all three live mod startup checks must pass on each platform before the release workflow publishes the draft. native updater metadata is `latest.json`, with signed platform payloads.
 
-version tags must match `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`. tags with a suffix such as `v2.0.0-beta.2` publish prereleases and leave the current stable release unchanged.
+version tags must match `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`. tags with a suffix such as `v2.1.0-beta.1` publish prereleases and leave the current stable release unchanged.
 
 ## source and credits
 

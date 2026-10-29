@@ -15,16 +15,17 @@ const flags:Array<[keyof Config,string,string]>=[
   ['minimizeToTray','Keep running when closed','Closing the window hides it. Use Quit to exit Kawaicord.'],
   ['startAtLogin','Start at login','Launch Kawaicord when you sign in.'],
   ['autoUpdateMods','Refresh client mods automatically','Download official browser builds for the next restart.'],
+  ['previewUpdates','Receive preview updates','Include experimental releases when checking for updates. Off by default.'],
   ['autoUpdateApp','Check for app updates','Check for signed native releases without interrupting calls.']
 ];
 async function load(){
-  const data=await invoke<{config:Config;runtime:RuntimeStatus;updater:{configured:boolean;message:string}}>('get_settings');config=data.config;
+  const data=await invoke<{config:Config;runtime:RuntimeStatus;updater:{available:boolean;message:string}}>('get_settings');config=data.config;
   get('version').textContent=`Version ${data.runtime.version}`;
   get('runtime').textContent=data.runtime.safeMode?'Recovery mode':data.runtime.ready?'Connected':'Starting Discord';
   get('mod-status').textContent=data.runtime.error??`${data.runtime.modules} Discord modules initialized`;
   get<HTMLSelectElement>('mod').value=config.activeMod;
   get('update-status').textContent=data.updater.message;
-  get<HTMLButtonElement>('check-update').disabled=!data.updater.configured;
+  get('apply-update').hidden=!data.updater.available;
   const options=get('options');options.replaceChildren();
   for(const [key,title,description] of flags){
     const label=document.createElement('label');label.className='option';const text=document.createElement('div');
@@ -39,7 +40,7 @@ bind('restart',async()=>{const activeMod=get<HTMLSelectElement>('mod').value;awa
 bind('recovery',()=>invoke('restart_recovery'));bind('normal',()=>invoke('restart_app'));
 bind('open-discord',()=>invoke('show_discord'));
 bind('refresh-mods',async()=>{await invoke('refresh_mods');notice.textContent='Mod bundles refreshed. Restart Kawaicord to apply them.';});
-bind('check-update',async()=>{const result=await invoke<{available:boolean;message:string}>('check_update');get('update-status').textContent=result.message;get('apply-update').hidden=!result.available;});
-bind('apply-update',()=>invoke('install_update'));
+bind('check-update',async()=>{get('apply-update').hidden=true;get('update-status').textContent='Checking for updates…';try{const result=await invoke<{available:boolean;message:string}>('check_update');get('update-status').textContent=result.message;get('apply-update').hidden=!result.available;}catch(error){get('update-status').textContent=String(error);throw error;}});
+bind('apply-update',async()=>{get('update-status').textContent='Downloading and verifying the update…';try{await invoke('install_update');}catch(error){get('update-status').textContent=String(error);throw error;}});
 get('project').onclick=event=>{event.preventDefault();void invoke('open_releases').catch(error);};
 void load().catch(error);

@@ -1,21 +1,19 @@
-kawaicord 2.0.0-beta.2. the coffee is doing most of the work.
+kawaicord 2.0.0. the coffee finally got a release build.
 
-- replaced the electron host with rust and tauri on macos, windows, and linux. the app uses the system webview and has no node sidecar.
-- added illegalcord alongside vencord and equicord. shelter still loads separately.
-- kept hcaptcha frames inside discord so verification no longer opens an external browser.
-- macos finally gets actual native traffic lights and a native titlebar.
-- calls, messages, audio, and notifications stay live when hidden. background mode only pauses decorative drawing.
-- restored settings inside discord with shelter’s theme-aware controls. removed the floating corner button.
-- bundled illegalcord’s actual badge image instead of loading a github file page.
-- added illegalcord’s multi-instance helper through native windows and separate session stores.
-- moved tray integration, startup preferences, notifications, rpc, and signed updates into the native host.
-- fixed official cloud oauth configuration requests and bundled the equicord and vencord cloud logos.
-- added a static nameplate fallback on macos for correct transparency. animation is unavailable with this fallback.
-- game detection is optional and disabled by default to avoid background scanning.
-- added universal mac installers, windows x64 installers, and linux x64 deb and appimage packages to one release pipeline.
+- replaced the electron host with rust, tauri, and a small typescript bridge on macos, windows, and linux. no bundled chromium or node sidecar.
+- fixed macos identifying itself as an unknown webkit client, which made discord reject voice calls as an unsupported browser. the app now reports the installed safari version and allows incoming audio playback.
+- added a local audio transport diagnostic in settings. it uses synthetic audio, keeps the microphone closed, and sends nothing to another person.
+- cleaned up settings into background, desktop, update, and recovery sections using discord-style controls. button labels stay inside their buttons.
+- saved first-install defaults explicitly. discord stays live when hidden, notifications and local rpc are on, game scanning and login startup are off. existing preferences survive upgrades, and broken configuration files are backed up before recovery.
+- made preview updates opt-in. update checks compare versions instead of publication order, reject overlapping operations, time out stalled requests, and keep the pending update available after an installation failure so you can retry. retrying starts a fresh download.
+- kept install and restart under your control. background update checks never restart a call.
+- added illegalcord alongside vencord and equicord, with shelter loaded separately. restored the actual illegalcord and cloud logos, native multi-instance sessions, and official cloud oauth configuration requests.
+- kept captcha frames inside discord, removed the floating settings button, and gave macos its native titlebar and traffic lights.
+- retained the macos static nameplate fallback for transparent video compositing. animation can be enabled in settings if your webview handles it correctly.
+- packaged universal macos installers, windows x64 installers, and linux x64 deb and appimage builds. every platform must pass build, regression, live mod startup, settings, cloud configuration, and instance-isolation checks before publication. macos also checks packaged audio transport.
 
-this is the first native preview. install it manually and sign in again; the 1.x profile is retained separately. v1.5.2 remains the stable release. do not run both clients at once unless you enjoy duplicate notifications.
+upgrading from 1.x requires a downloaded installer and a new sign-in. the old profile is retained separately. close the old client first to avoid duplicate notifications and competing rpc listeners. native beta installations keep their existing native profile.
 
-startup smoke checks cover the real discord sign-in page, shelter, all three client mods, and media api availability. authenticated calls and screen sharing still need real usage on each platform. webview media support varies with the os, codecs, and permissions.
+microphone, camera, screen sharing, codecs, and encrypted voice support still depend on the operating system and webview. the automated audio test checks local transport; it is not an authenticated discord call on every platform. keep your system webview current.
 
-mac builds are ad hoc signed and are not notarized. first launch may require approval in system settings. windows builds are unsigned. native updater payloads are signed with the project's update key.
+mac builds are ad hoc signed and are not notarized. first launch may require approval in system settings. windows installers are unsigned. native updater payloads are signed with the project's update key. linux appimage installs support the updater; deb installations use a downloaded deb package.

@@ -68,7 +68,7 @@ jobs:
           args: ${{ matrix.args }} ${{ !inputs.release && '--config {"bundle":{"createUpdaterArtifacts":false}}' || '' }}
           tagName: ${{ inputs.release && inputs.tag || '' }}
           releaseName: kawaicord __VERSION__, coffee acquired
-          releaseBody: native rewrite preview. full notes are in RELEASE_NOTES.md. install packages are below.
+          releaseBody: the native client, with coffee and fewer browser tantrums. full notes are in RELEASE_NOTES.md. install packages are below.
           releaseDraft: true
           prerelease: ${{ contains(inputs.tag, '-') }}
           uploadWorkflowArtifacts: true
@@ -82,6 +82,9 @@ jobs:
       - name: live discord startup with all three mods
         if: matrix.platform != 'linux'
         run: node scripts/smoke-native.mjs "${{ matrix.binary }}"
+      - name: packaged macos audio transport and browser identification
+        if: matrix.platform == 'macos'
+        run: node scripts/smoke-native.mjs "${{ matrix.binary }}" --media
       - name: live discord startup with all three mods on linux
         if: matrix.platform == 'linux'
         run: xvfb-run -a node scripts/smoke-native.mjs "${{ matrix.binary }}"
