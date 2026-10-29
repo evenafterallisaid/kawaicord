@@ -3,6 +3,7 @@ export interface MediaReport {
   userAgent: string;
   peerConnection: boolean;
   encodedTransforms: boolean;
+  discordVoiceSupported?: boolean;
   audioContext?: string;
   receivedBytes?: number;
   error?: string;
@@ -24,6 +25,10 @@ export async function testAudioTransport(): Promise<MediaReport> {
   let stream: MediaStream | undefined;
   let timeout: number | undefined;
   try {
+    const webpack = window.Vencord?.Webpack;
+    const engine = (webpack as any)?.Common?.MediaEngineStore ?? webpack?.findByProps?.('isSupported', 'getInputVolume');
+    report.discordVoiceSupported = typeof engine?.isSupported === 'function' ? engine.isSupported() : undefined;
+    if (report.discordVoiceSupported === false) throw new Error('Discord does not recognize voice support in this webview');
     if (!report.peerConnection) throw new Error('WebRTC is unavailable in this webview');
     context = new AudioContext();
     report.audioContext = context.state;

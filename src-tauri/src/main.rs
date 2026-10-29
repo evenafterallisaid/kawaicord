@@ -461,7 +461,7 @@ fn navigate_discord(window: &WebviewWindow, url: url::Url) -> Result<(), String>
                 .and_then(|value| value.downcast::<NSString>().ok()).map(|value| value.to_string())
                 .filter(|value| value.len() <= 32 && value.bytes().all(|byte| byte.is_ascii_digit() || byte == b'.'));
             if let Some(version) = version {
-                let agent = NSString::from_str(&format!("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{version} Safari/605.1.15 Kawaicord/{}", env!("CARGO_PKG_VERSION")));
+                let agent = NSString::from_str(&format!("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{version} Safari/605.1.15"));
                 let _: () = msg_send![inner, setCustomUserAgent:&*agent];
             }
             let configuration: *mut AnyObject = msg_send![inner, configuration];

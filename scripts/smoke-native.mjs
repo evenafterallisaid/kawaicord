@@ -52,6 +52,7 @@ for (const activeMod of integrationTest ? ['illegalcord'] : backgroundTest || me
     if (mediaTest) {
       assert.equal(media.ok, true, JSON.stringify(media));
       assert.equal(media.peerConnection, true);
+      assert.equal(media.discordVoiceSupported, true, 'Discord must select a supported voice engine');
       assert.ok(media.receivedBytes > 0);
       if (process.platform === 'darwin') assert.match(media.userAgent, /Version\/[\d.]+ Safari\//);
       console.log(JSON.stringify(media));
