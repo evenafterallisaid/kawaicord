@@ -50,7 +50,7 @@ for (const activeMod of integrationTest ? ['illegalcord'] : backgroundTest || me
     assert.equal(status.media, true);
     if (backgroundTest) {
       assert.equal(status.backgroundHidden, true); assert.ok(status.backgroundElapsed >= 370000);
-      if (process.platform === 'linux') { assert.equal(status.backgroundAudio?.ok, true); assert.ok(status.backgroundAudio.durationMs >= 370000); }
+      if (process.platform === 'linux') { assert.equal(status.backgroundAudio?.ok, true); assert.ok(status.backgroundAudio.durationMs >= 370000); assert.equal(status.backgroundDecorationsPaused, true); }
     }
     if (integrationTest) { assert.equal(integration.ok, true, JSON.stringify(integration)); console.log(JSON.stringify(integration)); }
     if (mediaTest) {

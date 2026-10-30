@@ -236,10 +236,15 @@ async function diagnose(record: ClientWindow, status: any) {
     saveJson(join(profile, 'media.json'), report); console.log(JSON.stringify(report)); await quit(report.ok ? 0 : 1); return;
   }
   if (flag('--background-test')) {
+    record.window.show();
+    if (!record.window.isVisible()) throw new Error('The background probe window did not become visible');
     const start=Date.now();
     await evaluate(record,'window.__kawaicordBackgroundProbe=window.__kawaicordTestAudio(370000); true');
     record.window.hide(); status.backgroundAudio=await evaluate(record,'window.__kawaicordBackgroundProbe');
-    status.backgroundElapsed=Date.now()-start; status.backgroundHidden=await evaluate(record,'document.hidden'); status.ready=await evaluate(record,'!!window.shelter&&Object.keys(window.Vencord?.Webpack?.cache||{}).length>100');
+    status.backgroundElapsed=Date.now()-start; status.backgroundHidden=!record.window.isVisible();
+    status.rendererVisibility=await evaluate(record,'document.visibilityState');
+    status.backgroundDecorationsPaused=await evaluate(record,"document.documentElement.dataset.kawaicordBackground==='true'");
+    status.ready=await evaluate(record,'!!window.shelter&&Object.keys(window.Vencord?.Webpack?.cache||{}).length>100');
     saveJson(join(profile,'runtime.json'),status); await quit(status.ready&&status.backgroundHidden&&status.backgroundAudio.ok?0:1); return;
   }
   if (flag('--integration-test')) {
