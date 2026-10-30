@@ -16,10 +16,10 @@ kawaicord 2.0.0. the coffee finally got a release build.
 - retained the macos static nameplate fallback for transparent video compositing. animation can be enabled in settings if your webview handles it correctly.
 - packaged universal macos installers, windows x64 installers, and linux x64 deb and appimage builds. every platform must pass build, regression, live mod startup, settings, cloud configuration, and instance-isolation checks before publication. each platform also checks discord’s voice engine and encrypted media apis; macos verifies signed capture entitlements. linux also runs synthetic audio loopback and a hidden-window connection check in ci. a real macos call was confirmed separately from headless ci.
 
+- fixed game detection for macos app bundles, long linux executable names, and shared engines that need exact launch arguments. launchers no longer masquerade as running games.
+
 upgrading from 1.x requires a downloaded installer and a new sign-in. the old profile is retained separately. close the old client first to avoid duplicate notifications and competing rpc listeners. native beta installations keep their existing native profile.
 
 microphone, camera, screen sharing, codecs, and encrypted voice support still depend on the operating system and webview. the automated audio test checks local transport; it is not an authenticated discord call on every platform. keep your system webview current.
 
 mac builds are ad hoc signed and are not notarized. first launch may require approval in system settings. windows installers are unsigned. native updater payloads are signed with the project's update key. linux appimage installs support the updater; deb installations use a downloaded deb package.
-
-- fixed game detection for macos app bundles, long linux executable names, and shared engines that need exact launch arguments. launchers no longer masquerade as running games.

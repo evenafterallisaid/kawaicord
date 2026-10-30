@@ -53,7 +53,8 @@
         "entry": {
           "StartupWMClass": "Kawaicord"
         }
-      }
+      },
+      "maintainer": "Kawaicord contributors <102906380+evenafterallisaid@users.noreply.github.com>"
     },
     "deb": {
       "depends": [
@@ -69,5 +70,6 @@
         "libasound2"
       ]
     }
-  }
+  },
+  "homepage": "https://github.com/evenafterallisaid/kawaicord"
 }
