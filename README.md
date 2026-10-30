@@ -10,7 +10,7 @@ discord, shelter, and your choice of vencord, equicord, or illegalcord. now with
 
 - macos uses wkwebview and the real native titlebar, including the three traffic lights. browser identification follows the installed safari version so discord can recognize voice support.
 - windows uses the system webview2 runtime and native window controls.
-- linux uses webkitgtk 4.1, with deb and appimage builds in the same release pipeline.
+- linux uses a chromium host with the same rust service, with deb and appimage builds in the same release pipeline. stable webkitgtk lacks the voice transport discord requires, so the linux package deliberately includes chromium.
 - shelter loads separately from the selected client mod, including in recovery mode.
 - mod updates download after startup. complete cached pairs and installer copies provide fallbacks.
 - closing the window keeps discord live by default. calls, messages, audio, and notifications are never deliberately suspended or unloaded to save memory.
@@ -18,7 +18,7 @@ discord, shelter, and your choice of vencord, equicord, or illegalcord. now with
 - on macos, static nameplates preserve transparency where webkit cannot composite transparent vp9 videos. the setting can be changed inside kawaicord settings.
 - illegalcord’s multi-instance helper opens native windows with isolated sessions. saved isolated sessions on macos require macos 14 or newer; temporary sessions work on older versions. detached windows work on all three platforms, and grouped native tabs are available on macos.
 - official equicord and vencord cloud requests use a restricted native bridge, so discord’s page policy does not block oauth setup. cloud authorization still happens through the mod’s regular discord dialog.
-- native rpc accepts activity from local applications without a node sidecar. automatic game detection is optional and off by default; enabling it checks executable paths every 30 seconds.
+- rust rpc accepts activity from local applications. macos and windows do not need a node sidecar. automatic game detection is optional and off by default; enabling it checks executable paths every 30 seconds. macos bundle paths and full linux executable names are matched, with exact argument checks for shared game engines. command lines are read only for matching candidates and are never logged.
 - settings live inside discord’s own settings sidebar and use shelter’s discord-style controls and your current theme. a local recovery window is available if discord cannot initialize. the native bridge exposes typed app actions without filesystem or shell access.
 - native releases use signed updater payloads. automatic checks never install an update or restart a call on their own.
 
@@ -32,9 +32,9 @@ get packages from [releases](https://github.com/evenafterallisaid/kawaicord/rele
 | --- | --- | --- |
 | macos | universal `.dmg` | macos 12 or newer, intel or apple silicon |
 | windows | `x64-setup.exe` | windows 10 or newer, webview2 evergreen runtime |
-| linux | `.deb` or `.AppImage` | x86_64, webkitgtk 4.1; ubuntu 22.04 or newer recommended |
+| linux | `.deb` or `.AppImage` | x86_64, bundled chromium; ubuntu 22.04 or newer recommended |
 
-mac builds are ad hoc signed and are not notarized. the first launch may need approval through system settings, privacy & security. windows installers are unsigned. on linux, mark the appimage executable before opening it; the deb package installs its webview dependencies through the package manager.
+mac builds are ad hoc signed and are not notarized. the first launch may need approval through system settings, privacy & security. windows installers are unsigned. on linux, mark the appimage executable before opening it; the deb package installs its system dependencies through the package manager. linux uses a new isolated chromium session store; older webkit login data stays on disk, and an upgrade from that engine requires signing in again.
 
 the native app uses a separate profile from 1.x. **you will need to sign in again**, and existing electron mod settings are not automatically migrated. the old profile is retained. close the old client before using the new one to avoid duplicate notifications and competing rpc listeners.
 
@@ -97,7 +97,7 @@ installers go under `src-tauri/target/`, in the release bundle directory for the
 npm run tauri -- build --config '{"bundle":{"createUpdaterArtifacts":false}}'
 ```
 
-`npm test` checks typescript, rust formatting, regression tests, and clippy. `npm run test:discord -- /absolute/path/to/kawaicord` opens isolated sign-in sessions for all three client mods, reports actual initialization, and exits. linux needs a graphical session or `xvfb-run -a`. it never uses an existing discord login. add `--integration` to check settings layout, cloud configuration, and separate instance storage, or `--media` to send synthetic audio through a local peer connection. the pipeline checks discord’s voice engine and encrypted media apis in each packaged app; macos also checks safari identification and signed microphone/camera entitlements. `--media` requires an interactive desktop with local network access. hosted mac runners may not expose usable local ice candidates, so ci uses `--media-preflight` rather than claiming a successful audio session.
+`npm test` checks typescript, rust formatting, regression tests, and clippy. `npm run test:discord -- /absolute/path/to/kawaicord` opens isolated sign-in sessions for all three client mods, reports actual initialization, and exits. linux needs a graphical session or `xvfb-run -a`. it never uses an existing discord login. add `--integration` to check settings layout, cloud configuration, and separate instance storage, or `--media` to send synthetic audio through a local peer connection. the pipeline checks discord’s voice engine and encrypted media apis in each packaged app; macos also checks safari identification and signed microphone/camera entitlements. `--media` requires an interactive desktop with local network access. hosted mac runners may not expose usable local ice candidates, so macos ci uses `--media-preflight` rather than claiming a successful audio session. linux ci also sends real synthetic audio through chromium with a pulse audio test sink.
 
 ## releases
 
@@ -107,6 +107,6 @@ version tags must match `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/t
 
 ## source and credits
 
-`src-tauri/` contains the rust host, desktop integration, rpc, bundle cache, and updater. `native-ui/` contains settings and the document-start typescript bridge. `native-data/` holds the optional game detection list. the three mod directories and `shelter/` contain installer fallbacks. generated assets, build output, and dependencies are ignored by git.
+`src-tauri/` contains the rust host, desktop integration, rpc, bundle cache, and updater. `linux-host/` contains the linux chromium adapter with sandboxed, isolated renderers and a private pipe to the shared rust service. `native-ui/` contains settings and the document-start typescript bridge. `native-data/` holds the optional game detection list. the three mod directories and `shelter/` contain installer fallbacks. generated assets, build output, and dependencies are ignored by git.
 
 original kawaicord source is [mit licensed](LICENSE). bundled mods keep their upstream licenses. see [third-party notices](THIRD_PARTY_NOTICES.md), including [shelter](https://github.com/uwu/shelter), [vencord](https://github.com/Vendicated/Vencord), [equicord](https://github.com/Equicord/Equicord), [illegalcord](https://github.com/ImHisako/Illegalcord), and [arrpc](https://github.com/OpenAsar/arrpc).

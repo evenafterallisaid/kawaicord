@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-close-notification"
+description = "Enables the close_notification command without any pre-configured scope."
+commands.allow = ["close_notification"]
+
+[[permission]]
+identifier = "deny-close-notification"
+description = "Denies the close_notification command without any pre-configured scope."
+commands.deny = ["close_notification"]

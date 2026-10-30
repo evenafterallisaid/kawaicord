@@ -17,7 +17,7 @@
     "package": "tauri build",
     "package:mac": "tauri build --target universal-apple-darwin --bundles app,dmg",
     "package:windows": "tauri build --bundles nsis",
-    "package:linux": "tauri build --bundles deb,appimage",
+    "package:linux": "npm run build && cargo build --locked --release --manifest-path src-tauri/Cargo.toml --no-default-features --features core-helper --bin kawaicord-core && npm ci --prefix linux-host && npm run build --prefix linux-host && npm run package --prefix linux-host",
     "test:discord": "node scripts/smoke-native.mjs"
   },
   "dependencies": {

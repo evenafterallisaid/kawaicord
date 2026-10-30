@@ -1,11 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod activity_host;
 mod bundles;
 mod cloud;
+mod cloud_client;
 mod config;
 mod diagnostics;
 mod games;
 mod instances;
 mod navigation;
+mod release_feed;
 mod rpc;
 mod updater;
 use config::{Config, Recovery, WindowState};
@@ -16,7 +19,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Mutex,
+        Arc, Mutex,
     },
 };
 use tauri::menu::{MenuBuilder, SubmenuBuilder};
@@ -46,13 +49,13 @@ pub struct RuntimeStatus {
 struct AppState {
     profile: PathBuf,
     window_state: Mutex<WindowState>,
-    config: Mutex<Config>,
+    config: Arc<Mutex<Config>>,
     runtime: Mutex<RuntimeStatus>,
     quitting: AtomicBool,
     refreshing: AtomicBool,
     #[cfg(target_os = "macos")]
     renderer_crashes: std::sync::atomic::AtomicUsize,
-    config_changed: tokio::sync::Notify,
+    config_changed: Arc<tokio::sync::Notify>,
     services: tokio::sync::Mutex<Option<rpc::Service>>,
     smoke: bool,
 }
@@ -278,12 +281,25 @@ fn get_settings(
         serde_json::json!({"config":*state.config.lock().map_err(|e|e.to_string())?,"runtime":*state.runtime.lock().map_err(|e|e.to_string())?,"updater":updater::status(&app)}),
     )
 }
+fn activity_host(app: &AppHandle) -> activity_host::ActivityHost {
+    let state = app.state::<AppState>();
+    let renderer = app.clone();
+    activity_host::ActivityHost::new(
+        state.config.clone(),
+        state.config_changed.clone(),
+        move |event| {
+            if let Some(window) = renderer.get_webview_window("main") {
+                let _ = window.eval(format!("window.__kawaicordActivity?.({event})"));
+            }
+        },
+    )
+}
 async fn configure_rpc(app: &AppHandle) {
     let state = app.state::<AppState>();
     let enabled = !state.smoke && state.config.lock().is_ok_and(|c| c.rich_presence);
     let mut services = state.services.lock().await;
     if enabled && services.is_none() {
-        match rpc::Service::start(app.clone()).await {
+        match rpc::Service::start(activity_host(app)).await {
             Ok(s) => *services = Some(s),
             Err(e) => state.log(&format!("Rich Presence unavailable: {e}")),
         }
@@ -417,7 +433,7 @@ fn report_runtime(
         clean_exit(&app);
         app.exit(code);
     } else if status.ready {
-        rpc::replay(&app);
+        rpc::replay(&activity_host(&app));
         if state.config.lock().is_ok_and(|c| c.auto_update_mods) {
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
@@ -802,13 +818,13 @@ fn main() {
             app.manage(AppState {
                 profile,
                 window_state: Mutex::new(window_state),
-                config: Mutex::new(config),
+                config: Arc::new(Mutex::new(config)),
                 runtime: Mutex::new(runtime),
                 quitting: AtomicBool::new(false),
                 refreshing: AtomicBool::new(false),
                 #[cfg(target_os = "macos")]
                 renderer_crashes: std::sync::atomic::AtomicUsize::new(0),
-                config_changed: tokio::sync::Notify::new(),
+                config_changed: Arc::new(tokio::sync::Notify::new()),
                 services: tokio::sync::Mutex::new(None),
                 smoke,
             });

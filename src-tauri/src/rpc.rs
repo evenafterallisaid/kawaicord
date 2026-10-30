@@ -1,4 +1,5 @@
 //! event-driven discord rpc. no node sidecar, process scanner, or idle polling.
+use crate::activity_host::ActivityHost as AppHandle;
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use std::{
@@ -9,7 +10,6 @@ use std::{
     },
     time::Duration,
 };
-use tauri::{AppHandle, Manager};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     sync::watch,
@@ -42,10 +42,8 @@ pub fn replay(app: &AppHandle) {
         .values()
         .cloned()
         .collect::<Vec<_>>();
-    if let Some(w) = app.get_webview_window("main") {
-        for event in events {
-            let _ = w.eval(format!("window.__kawaicordActivity?.({event})"));
-        }
+    for event in events {
+        app.emit(event);
     }
 }
 pub fn relay(app: &AppHandle, event: Value) {
@@ -57,9 +55,7 @@ pub fn relay(app: &AppHandle, event: Value) {
             cache.insert(id.to_owned(), event.clone());
         }
     }
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.eval(format!("window.__kawaicordActivity?.({event})"));
-    }
+    app.emit(event);
 }
 fn request(app: &AppHandle, client: &str, id: u64, message: Value) -> Value {
     let cmd = message["cmd"].as_str().unwrap_or_default();

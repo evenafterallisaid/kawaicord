@@ -56,6 +56,8 @@ pub async fn run(app: AppHandle, main: WebviewWindow) {
 async fn check(app: &AppHandle, main: &WebviewWindow) -> Result<Value, String> {
     #[cfg(target_os = "windows")]
     {
+        main.show().map_err(|error| error.to_string())?;
+        main.unminimize().map_err(|error| error.to_string())?;
         if main.is_decorated().map_err(|error| error.to_string())? {
             return Err("Windows still has the operating system titlebar".into());
         }
@@ -80,7 +82,9 @@ async fn check(app: &AppHandle, main: &WebviewWindow) -> Result<Value, String> {
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
             if !changed {
-                return Err("A custom window control did not change native window state".into());
+                return Err(format!(
+                    "Custom window control {button} did not reach state {expected}"
+                ));
             }
         }
         main.unminimize().map_err(|error| error.to_string())?;

@@ -34,3 +34,7 @@ src-tauri/target/
 src-tauri/gen/
 *.key
 *.key.pub
+
+# linux chromium host output
+linux-host/out/
+linux-host/release/

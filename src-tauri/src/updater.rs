@@ -1,4 +1,7 @@
-use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use crate::release_feed::Asset;
+use crate::release_feed::{select_manifest, Release};
+use serde::Serialize;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -30,18 +33,6 @@ fn acquire(updates: &Updates) -> Result<Operation<'_>, String> {
 pub struct Status {
     pub available: bool,
     pub message: String,
-}
-#[derive(Deserialize)]
-struct Asset {
-    name: String,
-    browser_download_url: String,
-}
-#[derive(Deserialize)]
-struct Release {
-    draft: bool,
-    prerelease: bool,
-    assets: Vec<Asset>,
-    tag_name: String,
 }
 pub fn status(app: &AppHandle) -> Status {
     app.state::<Updates>()
@@ -139,26 +130,6 @@ async fn check_inner(app: &AppHandle) -> Result<Status, String> {
     };
     *state.candidate.lock().map_err(|e| e.to_string())? = update;
     Ok(status)
-}
-fn select_manifest(releases: &[Release], allow_preview: bool) -> Option<&Asset> {
-    releases
-        .iter()
-        .filter(|release| !release.draft && (allow_preview || !release.prerelease))
-        .filter_map(|release| {
-            let version = semver::Version::parse(release.tag_name.trim_start_matches('v')).ok()?;
-            if !allow_preview && !version.pre.is_empty() {
-                return None;
-            }
-            Some((
-                version,
-                release
-                    .assets
-                    .iter()
-                    .find(|asset| asset.name == "latest.json")?,
-            ))
-        })
-        .max_by(|(a, _), (b, _)| a.cmp(b))
-        .map(|(_, asset)| asset)
 }
 pub async fn install(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<Updates>();

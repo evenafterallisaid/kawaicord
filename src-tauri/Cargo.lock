@@ -2126,6 +2126,7 @@ dependencies = [
  "gtk",
  "libc",
  "log",
+ "minisign-verify",
  "objc2",
  "objc2-foundation",
  "regex",

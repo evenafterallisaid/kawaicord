@@ -1,4 +1,7 @@
 fn main() {
+    if std::env::var_os("CARGO_FEATURE_NATIVE").is_none() {
+        return;
+    }
     let commands = &[
         "list_instances",
         "open_instance",
