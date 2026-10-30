@@ -19,6 +19,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v6
+        with:
+          name: kawaicord-linux
+          path: linux-artifacts
+      - name: add linux packages and merge the signed updater manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/publish-linux.mjs linux-artifacts
       - name: publish after every platform passes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

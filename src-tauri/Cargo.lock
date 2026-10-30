@@ -2117,7 +2117,7 @@ dependencies = [
 
 [[package]]
 name = "kawaicord"
-version = "2.0.0-beta.2"
+version = "2.0.0"
 dependencies = [
  "base64 0.22.1",
  "block2",
@@ -2126,10 +2126,12 @@ dependencies = [
  "gtk",
  "libc",
  "log",
+ "minisign-verify",
  "objc2",
  "objc2-foundation",
  "regex",
  "reqwest 0.12.28",
+ "semver",
  "serde",
  "serde_json",
  "sha2",

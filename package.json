@@ -1,6 +1,6 @@
 {
   "name": "kawaicord",
-  "version": "2.0.0-beta.2",
+  "version": "2.0.0",
   "private": true,
   "description": "a native discord client with shelter and three client mods",
   "license": "MIT",
@@ -13,11 +13,11 @@
     "dev": "tauri dev",
     "tauri": "tauri",
     "build": "tsc --noEmit && node scripts/build-native.mjs",
-    "test": "npm run build && cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo test --locked --manifest-path src-tauri/Cargo.toml && cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
+    "test": "npm run build && node --test tests/*.test.mjs && cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo test --locked --manifest-path src-tauri/Cargo.toml && cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
     "package": "tauri build",
     "package:mac": "tauri build --target universal-apple-darwin --bundles app,dmg",
     "package:windows": "tauri build --bundles nsis",
-    "package:linux": "tauri build --bundles deb,appimage",
+    "package:linux": "npm run build && cargo build --locked --release --manifest-path src-tauri/Cargo.toml --no-default-features --features core-helper --bin kawaicord-core && npm ci --prefix linux-host && npm run build --prefix linux-host && npm run package --prefix linux-host",
     "test:discord": "node scripts/smoke-native.mjs"
   },
   "dependencies": {

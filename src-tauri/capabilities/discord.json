@@ -21,6 +21,8 @@
     "allow-set-unread",
     "allow-notification-permission",
     "allow-notify",
+    "allow-close-notification",
+    "allow-window-action",
     "allow-restart-recovery",
     "allow-get-settings",
     "allow-save-config",

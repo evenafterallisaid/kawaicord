@@ -1,0 +1,75 @@
+{
+  "name": "kawaicord-linux",
+  "version": "2.0.0",
+  "private": true,
+  "description": "kawaicord with chromium for reliable linux voice and a shared rust core",
+  "author": "Kawaicord contributors",
+  "license": "MIT",
+  "main": "out/main.cjs",
+  "scripts": {
+    "build": "../node_modules/.bin/tsc --noEmit && node ../scripts/build-linux.mjs",
+    "package": "electron-builder --linux AppImage deb --x64"
+  },
+  "devDependencies": {
+    "electron": "45.1.0",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "com.kawaicord.native",
+    "productName": "Kawaicord",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/*.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../src-tauri/target/release/kawaicord-core",
+        "to": "kawaicord-core"
+      },
+      {
+        "from": "../src-tauri/icons/128x128.png",
+        "to": "icon.png"
+      },
+      {
+        "from": "../web-dist",
+        "to": "recovery",
+        "filter": [
+          "index.html",
+          "settings.js",
+          "settings.css",
+          "icon.png"
+        ]
+      }
+    ],
+    "linux": {
+      "category": "Network",
+      "icon": "../icons/icon.png",
+      "executableName": "kawaicord",
+      "artifactName": "Kawaicord_${version}_${arch}.${ext}",
+      "desktop": {
+        "entry": {
+          "StartupWMClass": "Kawaicord"
+        }
+      },
+      "maintainer": "Kawaicord contributors <102906380+evenafterallisaid@users.noreply.github.com>"
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libdrm2",
+        "libgbm1",
+        "libasound2"
+      ]
+    }
+  },
+  "homepage": "https://github.com/evenafterallisaid/kawaicord"
+}

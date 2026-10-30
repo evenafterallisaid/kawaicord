@@ -1,7 +1,7 @@
 name: build
 on:
   push:
-    branches: [main, agent/native-rust-rewrite]
+    branches: [main, agent/native-rust-rewrite, agent/release-readiness]
   pull_request:
   workflow_dispatch:
 permissions:

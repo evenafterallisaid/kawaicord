@@ -1,11 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod activity_host;
 mod bundles;
 mod cloud;
+mod cloud_client;
 mod config;
 mod diagnostics;
 mod games;
 mod instances;
 mod navigation;
+mod release_feed;
 mod rpc;
 mod updater;
 use config::{Config, Recovery, WindowState};
@@ -16,7 +19,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Mutex,
+        Arc, Mutex,
     },
 };
 use tauri::menu::{MenuBuilder, SubmenuBuilder};
@@ -46,13 +49,13 @@ pub struct RuntimeStatus {
 struct AppState {
     profile: PathBuf,
     window_state: Mutex<WindowState>,
-    config: Mutex<Config>,
+    config: Arc<Mutex<Config>>,
     runtime: Mutex<RuntimeStatus>,
     quitting: AtomicBool,
     refreshing: AtomicBool,
     #[cfg(target_os = "macos")]
     renderer_crashes: std::sync::atomic::AtomicUsize,
-    config_changed: tokio::sync::Notify,
+    config_changed: Arc<tokio::sync::Notify>,
     services: tokio::sync::Mutex<Option<rpc::Service>>,
     smoke: bool,
 }
@@ -122,6 +125,67 @@ fn clean_exit(app: &AppHandle) {
             let _ = config::save_json(&state.profile.join("window.json"), &*saved);
         }
     }
+}
+#[derive(Serialize, PartialEq)]
+struct ChromeState {
+    maximized: bool,
+    focused: bool,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum WindowAction {
+    State,
+    Minimize,
+    Maximize,
+    Close,
+    Drag,
+}
+fn chrome_state(window: &WebviewWindow) -> ChromeState {
+    ChromeState {
+        maximized: window.is_maximized().unwrap_or(false),
+        focused: window.is_focused().unwrap_or(false),
+    }
+}
+fn report_window_state(window: &WebviewWindow, previous: &Mutex<Option<ChromeState>>) {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let state = chrome_state(window);
+        if let Ok(mut previous) = previous.lock() {
+            if previous.as_ref() != Some(&state) {
+                if let Ok(serialized) = serde_json::to_string(&state) {
+                    let _ = window.eval(format!("window.__kawaicordWindowState?.({serialized})"));
+                }
+                *previous = Some(state);
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    let _ = (window, previous);
+}
+#[tauri::command]
+fn window_action(window: WebviewWindow, action: WindowAction) -> Result<ChromeState, String> {
+    if !trusted(&window) {
+        return Err("Untrusted renderer".into());
+    }
+    match action {
+        WindowAction::State => {}
+        WindowAction::Minimize => window.minimize().map_err(|e| e.to_string())?,
+        WindowAction::Maximize => {
+            if window.is_maximized().map_err(|e| e.to_string())? {
+                window.unmaximize()
+            } else {
+                window.maximize()
+            }
+            .map_err(|e| e.to_string())?;
+        }
+        WindowAction::Close => {
+            let state = chrome_state(&window);
+            window.close().map_err(|e| e.to_string())?;
+            return Ok(state);
+        }
+        WindowAction::Drag => window.start_dragging().map_err(|e| e.to_string())?,
+    }
+    Ok(chrome_state(&window))
 }
 #[tauri::command]
 async fn show_discord(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
@@ -208,12 +272,26 @@ async fn restart_recovery(app: AppHandle, window: WebviewWindow) -> Result<(), S
 }
 #[tauri::command]
 fn get_settings(
+    app: AppHandle,
     window: WebviewWindow,
     state: State<AppState>,
 ) -> Result<serde_json::Value, String> {
     either(&window)?;
     Ok(
-        serde_json::json!({"config":*state.config.lock().map_err(|e|e.to_string())?,"runtime":*state.runtime.lock().map_err(|e|e.to_string())?,"updater":{"configured":true,"message":"Native updates use signed release packages. Check manually below."}}),
+        serde_json::json!({"config":*state.config.lock().map_err(|e|e.to_string())?,"runtime":*state.runtime.lock().map_err(|e|e.to_string())?,"updater":updater::status(&app)}),
+    )
+}
+fn activity_host(app: &AppHandle) -> activity_host::ActivityHost {
+    let state = app.state::<AppState>();
+    let renderer = app.clone();
+    activity_host::ActivityHost::new(
+        state.config.clone(),
+        state.config_changed.clone(),
+        move |event| {
+            if let Some(window) = renderer.get_webview_window("main") {
+                let _ = window.eval(format!("window.__kawaicordActivity?.({event})"));
+            }
+        },
     )
 }
 async fn configure_rpc(app: &AppHandle) {
@@ -221,7 +299,7 @@ async fn configure_rpc(app: &AppHandle) {
     let enabled = !state.smoke && state.config.lock().is_ok_and(|c| c.rich_presence);
     let mut services = state.services.lock().await;
     if enabled && services.is_none() {
-        match rpc::Service::start(app.clone()).await {
+        match rpc::Service::start(activity_host(app)).await {
             Ok(s) => *services = Some(s),
             Err(e) => state.log(&format!("Rich Presence unavailable: {e}")),
         }
@@ -325,6 +403,10 @@ fn report_runtime(
     config::save_json(&state.profile.join("runtime.json"), &status)?;
     *state.runtime.lock().map_err(|e| e.to_string())? = status.clone();
     if state.smoke {
+        if std::env::args().any(|a| a == "--media-test") && status.ready {
+            tauri::async_runtime::spawn(diagnostics::run_media(app.clone(), window.clone()));
+            return Ok(());
+        }
         if std::env::args().any(|a| a == "--integration-test") && status.ready {
             tauri::async_runtime::spawn(diagnostics::run(app.clone(), window.clone()));
             return Ok(());
@@ -351,7 +433,7 @@ fn report_runtime(
         clean_exit(&app);
         app.exit(code);
     } else if status.ready {
-        rpc::replay(&app);
+        rpc::replay(&activity_host(&app));
         if state.config.lock().is_ok_and(|c| c.auto_update_mods) {
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
@@ -398,6 +480,7 @@ fn notify(
     state: State<AppState>,
     title: String,
     body: String,
+    id: i32,
 ) -> Result<(), String> {
     if !trusted(&window) || !state.config.lock().is_ok_and(|c| c.notifications) {
         return Err("Notifications disabled".into());
@@ -413,10 +496,21 @@ fn notify(
     }
     app.notification()
         .builder()
+        .id(id)
+        .extra("window", window.label())
         .title(title.chars().take(160).collect::<String>())
         .body(body.chars().take(1000).collect::<String>())
         .show()
         .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn close_notification(app: AppHandle, window: WebviewWindow, id: i32) -> Result<(), String> {
+    if !trusted(&window) {
+        return Err("Untrusted renderer".into());
+    }
+    app.notification()
+        .remove_active(vec![id])
+        .map_err(|error| error.to_string())
 }
 #[tauri::command]
 async fn check_update(app: AppHandle, window: WebviewWindow) -> Result<updater::Status, String> {
@@ -439,7 +533,7 @@ async fn open_releases(app: AppHandle, window: WebviewWindow) -> Result<(), Stri
         .map_err(|e| e.to_string())
 }
 fn open_external(app: &AppHandle, url: &url::Url) {
-    if matches!(url.scheme(), "https" | "http" | "mailto") {
+    if navigation::external(url) {
         let _ = app.opener().open_url(url.as_str(), None::<&str>);
     }
 }
@@ -448,9 +542,19 @@ fn navigate_discord(window: &WebviewWindow, url: url::Url) -> Result<(), String>
     window
         .with_webview(move |view| unsafe {
             use objc2::{msg_send, runtime::AnyObject};
-            use objc2_foundation::{ns_string, NSNumber};
+            use objc2_foundation::{ns_string, NSNumber, NSBundle, NSString};
             let inner = view.inner() as *mut AnyObject;
+            // wkwebview omits safari identification, which discord needs for voice support.
+            let version = NSBundle::bundleWithPath(&NSString::from_str("/Applications/Safari.app"))
+                .and_then(|bundle| bundle.objectForInfoDictionaryKey(ns_string!("CFBundleShortVersionString")))
+                .and_then(|value| value.downcast::<NSString>().ok()).map(|value| value.to_string())
+                .filter(|value| value.len() <= 32 && value.bytes().all(|byte| byte.is_ascii_digit() || byte == b'.'));
+            if let Some(version) = version {
+                let agent = NSString::from_str(&format!("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{version} Safari/605.1.15"));
+                let _: () = msg_send![inner, setCustomUserAgent:&*agent];
+            }
             let configuration: *mut AnyObject = msg_send![inner, configuration];
+            let _: () = msg_send![configuration, setMediaTypesRequiringUserActionForPlayback:0usize];
             let preferences: *mut AnyObject = msg_send![configuration, preferences];
             let yes = NSNumber::numberWithBool(true);
             let _: () =
@@ -483,7 +587,7 @@ fn build_discord(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     .title("Kawaicord")
     .inner_size(width, height)
     .min_inner_size(800.0, 600.0)
-    .decorations(true)
+    .decorations(cfg!(target_os = "macos"))
     .initialization_script(script)
     .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
     .on_navigation(move |url| {
@@ -522,6 +626,7 @@ fn build_discord(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     }
     let handle = app.clone();
     let events = window.clone();
+    let previous_chrome = Mutex::new(None);
     window.on_window_event(move |event| {
         let state = handle.state::<AppState>();
         match event {
@@ -555,6 +660,9 @@ fn build_discord(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             _ => {}
+        }
+        if matches!(event, WindowEvent::Focused(_) | WindowEvent::Resized(_)) {
+            report_window_state(&events, &previous_chrome);
         }
     });
     Ok(())
@@ -591,6 +699,10 @@ fn desktop(app: &AppHandle) -> tauri::Result<()> {
         .items(&[&file, &edit, &view])
         .build()?;
     app.set_menu(menu)?;
+    #[cfg(not(target_os = "macos"))]
+    for window in app.webview_windows().values() {
+        window.hide_menu()?;
+    }
     let tray_menu = MenuBuilder::new(app)
         .text("show", "Open Kawaicord")
         .text("settings", "Settings…")
@@ -646,9 +758,11 @@ fn main() {
             set_unread,
             notification_permission,
             notify,
+            close_notification,
             check_update,
             install_update,
-            open_releases
+            open_releases,
+            window_action
         ])
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show(app),
@@ -677,7 +791,7 @@ fn main() {
             let smoke = std::env::args().any(|arg| arg == "--smoke-test");
             let profile = config::profile_override().unwrap_or(app.path().app_data_dir()?);
             fs::create_dir_all(&profile)?;
-            let config: Config = config::read_json(&profile.join("config.json"));
+            let config = config::load_config(&profile.join("config.json"))?;
             let recovery: Recovery = config::read_json(&profile.join("recovery.json"));
             let requested: Option<bool> = fs::read(profile.join("safe-mode.json"))
                 .ok()
@@ -704,17 +818,43 @@ fn main() {
             app.manage(AppState {
                 profile,
                 window_state: Mutex::new(window_state),
-                config: Mutex::new(config),
+                config: Arc::new(Mutex::new(config)),
                 runtime: Mutex::new(runtime),
                 quitting: AtomicBool::new(false),
                 refreshing: AtomicBool::new(false),
                 #[cfg(target_os = "macos")]
                 renderer_crashes: std::sync::atomic::AtomicUsize::new(0),
-                config_changed: tokio::sync::Notify::new(),
+                config_changed: Arc::new(tokio::sync::Notify::new()),
                 services: tokio::sync::Mutex::new(None),
                 smoke,
             });
             app.state::<AppState>().recovery(false);
+            let notifications = app.handle().clone();
+            app.notification().on_action(move |action| {
+                if action.action_id() != "tap" {
+                    return;
+                }
+                let notification = action.notification();
+                let label = notification
+                    .and_then(|item| item.extra().get("window"))
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("main");
+                if let Some(window) = notifications
+                    .get_webview_window(label)
+                    .or_else(|| notifications.get_webview_window("main"))
+                {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    background(&window, false);
+                    let _ = window.set_focus();
+                    if let Some(notification) = notification {
+                        let _ = window.eval(format!(
+                            "window.__kawaicordNotificationClick?.({})",
+                            notification.id()
+                        ));
+                    }
+                }
+            })?;
             build_discord(app.handle())?;
             desktop(app.handle())?;
             let handle = app.handle().clone();

@@ -1,5 +1,29 @@
 use url::Url;
 
+pub fn external(url: &Url) -> bool {
+    if matches!(url.scheme(), "https" | "http" | "mailto") {
+        return true;
+    }
+    if url.scheme() != "spotify"
+        || url.has_host()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return false;
+    }
+    if url.path().is_empty() {
+        return true;
+    }
+    let Some((kind, id)) = url.path().split_once(':') else {
+        return false;
+    };
+    matches!(
+        kind,
+        "track" | "album" | "artist" | "playlist" | "episode" | "show"
+    ) && id.len() == 22
+        && id.bytes().all(|byte| byte.is_ascii_alphanumeric())
+}
+
 // wkwebview sends subframe navigations through the same callback as the main
 // document. captcha frames must stay embedded so their parent can receive the
 // completion message. ipc permissions remain restricted to discord.com.
@@ -26,6 +50,27 @@ pub fn embedded(url: &Url) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn spotify_launch_links_reach_the_registered_app() {
+        for value in [
+            "spotify:",
+            "spotify:track:0123456789abcdefghijkl",
+            "spotify:playlist:0123456789abcdefghijkl",
+            "https://open.spotify.com/track/example",
+        ] {
+            assert!(external(&Url::parse(value).unwrap()), "{value}");
+        }
+        for value in [
+            "spotify://example.com",
+            "spotify:track:bad",
+            "spotify:track:0123456789abcdefghijkl?command=other",
+            "spotify:app:other",
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+        ] {
+            assert!(!external(&Url::parse(value).unwrap()), "{value}");
+        }
+    }
     #[test]
     fn captcha_frames_stay_embedded() {
         for url in [

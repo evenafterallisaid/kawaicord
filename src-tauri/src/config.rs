@@ -36,6 +36,7 @@ pub struct Config {
     pub start_at_login: bool,
     pub auto_update_mods: bool,
     pub auto_update_app: bool,
+    pub preview_updates: bool,
     pub notifications: bool,
 }
 impl Default for Config {
@@ -51,6 +52,7 @@ impl Default for Config {
             start_at_login: false,
             auto_update_mods: true,
             auto_update_app: true,
+            preview_updates: false,
             notifications: true,
         }
     }
@@ -152,5 +154,60 @@ mod tests {
     fn background_defaults_keep_services_alive() {
         let c = Config::default();
         assert!(c.rich_presence && c.notifications && c.performance_mode);
+    }
+}
+
+pub fn load_config(path: &Path) -> Result<Config, String> {
+    let config = if path.exists() {
+        let bytes = fs::read(path).map_err(|error| error.to_string())?;
+        match serde_json::from_slice::<Config>(&bytes) {
+            Ok(config) => config,
+            Err(_) => {
+                fs::copy(path, path.with_extension(format!("corrupt-{}.json", now())))
+                    .map_err(|error| error.to_string())?;
+                Config::default()
+            }
+        }
+    } else {
+        Config::default()
+    };
+    save_json(path, &config)?;
+    Ok(config)
+}
+
+#[cfg(test)]
+mod installation_tests {
+    use super::*;
+    #[test]
+    fn installation_defaults_are_saved_and_existing_choices_survive() {
+        let dir = std::env::temp_dir().join(format!(
+            "kawaicord-config-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = dir.join("config.json");
+        let mut config = load_config(&path).unwrap();
+        assert!(path.exists());
+        assert!(config.notifications);
+        assert!(config.minimize_to_tray);
+        assert!(!config.preview_updates);
+        assert!(!config.start_at_login);
+        assert!(!config.detect_games);
+        config.active_mod = ClientMod::Illegalcord;
+        config.notifications = false;
+        save_json(&path, &config).unwrap();
+        let restored = load_config(&path).unwrap();
+        assert_eq!(restored.active_mod, ClientMod::Illegalcord);
+        assert!(!restored.notifications);
+        std::fs::write(&path, b"broken settings").unwrap();
+        load_config(&path).unwrap();
+        assert!(std::fs::read_dir(&dir)
+            .unwrap()
+            .any(|entry| std::fs::read(entry.unwrap().path())
+                .is_ok_and(|bytes| bytes == b"broken settings")));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

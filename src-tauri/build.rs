@@ -1,4 +1,7 @@
 fn main() {
+    if std::env::var_os("CARGO_FEATURE_NATIVE").is_none() {
+        return;
+    }
     let commands = &[
         "list_instances",
         "open_instance",
@@ -19,9 +22,11 @@ fn main() {
         "set_unread",
         "notification_permission",
         "notify",
+        "close_notification",
         "check_update",
         "install_update",
         "open_releases",
+        "window_action",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()
