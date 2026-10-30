@@ -5,6 +5,8 @@ kawaicord 2.0.0. the coffee finally got a release build.
 - added the microphone and camera entitlements to signed mac builds. without them, macos denied microphone access before it could show a permission prompt.
 - restored spotify app and media launch links, which the native navigation handler was dropping. added a read-only spotify connection check that distinguishes playback rejection from lost sync without recording credentials or changing playback. this does not claim to fix spotify desktop playback bugs.
 - added a local audio transport diagnostic in settings. it uses synthetic audio, keeps the microphone closed, and sends nothing to another person.
+- restored the discord-style frame and window controls on windows and linux. macos keeps its native traffic lights.
+- repaired notification delivery after changing settings and restored notification click callbacks. permission checks run on settings and focus changes; callback storage is bounded.
 - cleaned up settings into background, desktop, update, and recovery sections using discord-style controls. button labels stay inside their buttons.
 - saved first-install defaults explicitly. discord stays live when hidden, notifications and local rpc are on, game scanning and login startup are off. existing preferences survive upgrades, and broken configuration files are backed up before recovery.
 - made preview updates opt-in. update checks compare versions instead of publication order, reject overlapping operations, time out stalled requests, and keep the pending update available after an installation failure so you can retry. retrying starts a fresh download.

@@ -1,5 +1,7 @@
 import './media';
 import { installSpotifyDiagnostics } from './spotify';
+import { installTitlebar } from './titlebar';
+import { installNotifications } from './notifications';
 import { installCloudBridge } from './cloud';
 import { nameplateCompatibility } from './nameplates';
 import { instanceHelpers } from './instances';
@@ -20,6 +22,7 @@ declare global {
 // the bridge is scoped to discord and typed app actions. no filesystem or shell commands.
 const invoke = window.__TAURI_INTERNALS__.invoke.bind(window.__TAURI_INTERNALS__);
 const boot=window.__KAWAICORD_BOOT__;
+const refreshNotificationPermission = installNotifications(invoke, () => boot.config.notifications);
 installCloudBridge(invoke);
 installSpotifyDiagnostics();
 const setStaticNameplates=nameplateCompatibility();
@@ -43,6 +46,7 @@ function updateUnread(){
   if(count!==lastUnread){lastUnread=count;void invoke('set_unread',{count}).catch(()=>{});}
 }
 mounted(()=>{
+  if (boot.platform !== 'macos') installTitlebar(invoke);
   style('html[data-kawaicord-background="true"] *,html[data-kawaicord-background="true"] *::before,html[data-kawaicord-background="true"] *::after{animation-play-state:paused!important;transition-duration:0s!important}html[data-kawaicord-background="true"] #app-mount img{visibility:hidden!important}');
   window.__kawaicordSetBackground?.(background);
   setStaticNameplates(boot.config.staticNameplates);
@@ -81,7 +85,7 @@ export {};
 // preserve the connection in webviews that otherwise freeze a hidden page.
 // a pending web lock uses no polling timer and is released on navigation.
 if(navigator.locks)void navigator.locks.request('kawaicord-live',()=>new Promise<void>(resolve=>window.addEventListener('pagehide',()=>resolve(),{once:true}))).catch(()=>{});
-(window as any).__kawaicordUpdateConfig=(config:Config)=>{Object.assign(boot.config,config);window.__kawaicordSetBackground?.(background);setStaticNameplates(config.staticNameplates);};
+(window as any).__kawaicordUpdateConfig=(config:Config)=>{Object.assign(boot.config,config);window.__kawaicordSetBackground?.(background);setStaticNameplates(config.staticNameplates);void refreshNotificationPermission();};
 (window as any).__kawaicordActivity=async(data:any)=>{
   const webpack:any=window.Vencord?.Webpack;
   const common=webpack?.Common;
@@ -97,17 +101,3 @@ if(navigator.locks)void navigator.locks.request('kawaicord-live',()=>new Promise
   }
   common.FluxDispatcher.dispatch({type:'LOCAL_ACTIVITY_UPDATE',...data});
 };
-// notification delivery belongs to the native host, not an extra renderer.
-if(boot.config.notifications){
-  let permission:NotificationPermission='default';
-  void invoke<string>('notification_permission',{request:false}).then(p=>{permission=p==='granted'?'granted':p==='denied'?'denied':'default';}).catch(()=>{});
-  class NativeNotification extends EventTarget{
-    static get permission(){return permission;}
-    static async requestPermission(callback?:(permission:NotificationPermission)=>void){const p=await invoke<string>('notification_permission',{request:true});permission=p==='granted'?'granted':p==='denied'?'denied':'default';callback?.(permission);return permission;}
-    readonly title:string;
-    onclick:((event:Event)=>void)|null=null;onclose:((event:Event)=>void)|null=null;onerror:((event:Event)=>void)|null=null;onshow:((event:Event)=>void)|null=null;
-    constructor(title:string,options:NotificationOptions={}){super();this.title=title;if(permission==='granted')void invoke('notify',{title,body:options.body??''}).catch(()=>{});}
-    close(){this.onclose?.(new Event('close'));}
-  }
-  Object.defineProperty(window,'Notification',{value:NativeNotification,writable:true,configurable:true});
-}

@@ -54,6 +54,37 @@ pub async fn run(app: AppHandle, main: WebviewWindow) {
     app.exit(code);
 }
 async fn check(app: &AppHandle, main: &WebviewWindow) -> Result<Value, String> {
+    #[cfg(target_os = "windows")]
+    {
+        if main.is_decorated().map_err(|error| error.to_string())? {
+            return Err("Windows still has the operating system titlebar".into());
+        }
+        let controls = evaluate(main, "(()=>{const host=document.getElementById('kawaicord-window-controls');const r=host?.getBoundingClientRect();return host?.shadowRoot?.querySelectorAll('button').length===3&&r.height===32&&r.width===138})()").await?;
+        if controls != true {
+            return Err("Custom window controls are missing or have the wrong size".into());
+        }
+        for (button, expected) in [(1, true), (1, false), (0, true)] {
+            evaluate(main, &format!("(document.getElementById('kawaicord-window-controls').shadowRoot.querySelectorAll('button')[{button}].click(),true)")).await?;
+            let mut changed = false;
+            for _ in 0..30 {
+                let actual = if button == 0 {
+                    main.is_minimized()
+                } else {
+                    main.is_maximized()
+                }
+                .map_err(|error| error.to_string())?;
+                if actual == expected {
+                    changed = true;
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            if !changed {
+                return Err("A custom window control did not change native window state".into());
+            }
+        }
+        main.unminimize().map_err(|error| error.to_string())?;
+    }
     let log = |message: &str| app.state::<super::AppState>().log(message);
     let id_a = format!("smoke-a-{}", std::process::id());
     let id_b = format!("smoke-b-{}", std::process::id());
@@ -135,6 +166,26 @@ async fn check(app: &AppHandle, main: &WebviewWindow) -> Result<Value, String> {
     if cleared != true {
         return Err("Cleared instance login data returned after reopening".into());
     }
+    #[cfg(target_os = "windows")]
+    {
+        evaluate(&reopened, "(document.getElementById('kawaicord-window-controls').shadowRoot.querySelector('[aria-label=Close]').click(),true)").await?;
+        for _ in 0..30 {
+            if app
+                .get_webview_window(&format!("instance-{id_a}"))
+                .is_none()
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        if app
+            .get_webview_window(&format!("instance-{id_a}"))
+            .is_some()
+        {
+            return Err("The custom close button did not close its instance".into());
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
     super::instances::close_instance(app.clone(), main.clone(), id_a.clone()).await?;
     super::instances::clear_instance_session(app.clone(), main.clone(), id_a.clone()).await?;
     for (id, name) in [(&id_a, "temporary a"), (&id_b, "temporary b")] {

@@ -123,6 +123,67 @@ fn clean_exit(app: &AppHandle) {
         }
     }
 }
+#[derive(Serialize, PartialEq)]
+struct ChromeState {
+    maximized: bool,
+    focused: bool,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum WindowAction {
+    State,
+    Minimize,
+    Maximize,
+    Close,
+    Drag,
+}
+fn chrome_state(window: &WebviewWindow) -> ChromeState {
+    ChromeState {
+        maximized: window.is_maximized().unwrap_or(false),
+        focused: window.is_focused().unwrap_or(false),
+    }
+}
+fn report_window_state(window: &WebviewWindow, previous: &Mutex<Option<ChromeState>>) {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let state = chrome_state(window);
+        if let Ok(mut previous) = previous.lock() {
+            if previous.as_ref() != Some(&state) {
+                if let Ok(serialized) = serde_json::to_string(&state) {
+                    let _ = window.eval(format!("window.__kawaicordWindowState?.({serialized})"));
+                }
+                *previous = Some(state);
+            }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    let _ = (window, previous);
+}
+#[tauri::command]
+fn window_action(window: WebviewWindow, action: WindowAction) -> Result<ChromeState, String> {
+    if !trusted(&window) {
+        return Err("Untrusted renderer".into());
+    }
+    match action {
+        WindowAction::State => {}
+        WindowAction::Minimize => window.minimize().map_err(|e| e.to_string())?,
+        WindowAction::Maximize => {
+            if window.is_maximized().map_err(|e| e.to_string())? {
+                window.unmaximize()
+            } else {
+                window.maximize()
+            }
+            .map_err(|e| e.to_string())?;
+        }
+        WindowAction::Close => {
+            let state = chrome_state(&window);
+            window.close().map_err(|e| e.to_string())?;
+            return Ok(state);
+        }
+        WindowAction::Drag => window.start_dragging().map_err(|e| e.to_string())?,
+    }
+    Ok(chrome_state(&window))
+}
 #[tauri::command]
 async fn show_discord(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
     local(&window)?;
@@ -403,6 +464,7 @@ fn notify(
     state: State<AppState>,
     title: String,
     body: String,
+    id: i32,
 ) -> Result<(), String> {
     if !trusted(&window) || !state.config.lock().is_ok_and(|c| c.notifications) {
         return Err("Notifications disabled".into());
@@ -418,10 +480,21 @@ fn notify(
     }
     app.notification()
         .builder()
+        .id(id)
+        .extra("window", window.label())
         .title(title.chars().take(160).collect::<String>())
         .body(body.chars().take(1000).collect::<String>())
         .show()
         .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn close_notification(app: AppHandle, window: WebviewWindow, id: i32) -> Result<(), String> {
+    if !trusted(&window) {
+        return Err("Untrusted renderer".into());
+    }
+    app.notification()
+        .remove_active(vec![id])
+        .map_err(|error| error.to_string())
 }
 #[tauri::command]
 async fn check_update(app: AppHandle, window: WebviewWindow) -> Result<updater::Status, String> {
@@ -498,7 +571,7 @@ fn build_discord(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     .title("Kawaicord")
     .inner_size(width, height)
     .min_inner_size(800.0, 600.0)
-    .decorations(true)
+    .decorations(cfg!(target_os = "macos"))
     .initialization_script(script)
     .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
     .on_navigation(move |url| {
@@ -537,6 +610,7 @@ fn build_discord(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     }
     let handle = app.clone();
     let events = window.clone();
+    let previous_chrome = Mutex::new(None);
     window.on_window_event(move |event| {
         let state = handle.state::<AppState>();
         match event {
@@ -570,6 +644,9 @@ fn build_discord(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             _ => {}
+        }
+        if matches!(event, WindowEvent::Focused(_) | WindowEvent::Resized(_)) {
+            report_window_state(&events, &previous_chrome);
         }
     });
     Ok(())
@@ -606,6 +683,10 @@ fn desktop(app: &AppHandle) -> tauri::Result<()> {
         .items(&[&file, &edit, &view])
         .build()?;
     app.set_menu(menu)?;
+    #[cfg(not(target_os = "macos"))]
+    for window in app.webview_windows().values() {
+        window.hide_menu()?;
+    }
     let tray_menu = MenuBuilder::new(app)
         .text("show", "Open Kawaicord")
         .text("settings", "Settings…")
@@ -661,9 +742,11 @@ fn main() {
             set_unread,
             notification_permission,
             notify,
+            close_notification,
             check_update,
             install_update,
-            open_releases
+            open_releases,
+            window_action
         ])
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show(app),
@@ -730,6 +813,32 @@ fn main() {
                 smoke,
             });
             app.state::<AppState>().recovery(false);
+            let notifications = app.handle().clone();
+            app.notification().on_action(move |action| {
+                if action.action_id() != "tap" {
+                    return;
+                }
+                let notification = action.notification();
+                let label = notification
+                    .and_then(|item| item.extra().get("window"))
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("main");
+                if let Some(window) = notifications
+                    .get_webview_window(label)
+                    .or_else(|| notifications.get_webview_window("main"))
+                {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    background(&window, false);
+                    let _ = window.set_focus();
+                    if let Some(notification) = notification {
+                        let _ = window.eval(format!(
+                            "window.__kawaicordNotificationClick?.({})",
+                            notification.id()
+                        ));
+                    }
+                }
+            })?;
             build_discord(app.handle())?;
             desktop(app.handle())?;
             let handle = app.handle().clone();

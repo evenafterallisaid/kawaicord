@@ -162,7 +162,7 @@ pub async fn open_instance(
     .title(format!("{title} | Kawaicord"))
     .inner_size(1100.0, 800.0)
     .min_inner_size(800.0, 600.0)
-    .decorations(true)
+    .decorations(cfg!(target_os = "macos"))
     .initialization_script(script)
     .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
     .on_navigation(move |u| {
@@ -211,6 +211,8 @@ pub async fn open_instance(
         builder = builder.tabbing_identifier("kawaicord-accounts");
     }
     let instance = builder.build().map_err(|e| e.to_string())?;
+    #[cfg(not(target_os = "macos"))]
+    instance.hide_menu().map_err(|error| error.to_string())?;
     super::navigate_discord(&instance, format!("https://{domain}/app").parse().unwrap())?;
     app.state::<Instances>()
         .0
@@ -248,16 +250,21 @@ pub async fn open_instance(
     }
     let handle = app.clone();
     let events = instance.clone();
+    let previous_chrome = Mutex::new(None);
     instance.on_window_event(move |event| match event {
         WindowEvent::Destroyed => {
             if let Ok(mut instances) = handle.state::<Instances>().0.lock() {
                 instances.remove(&label);
             }
         }
-        WindowEvent::Focused(_) => super::background(
-            &events,
-            !events.is_visible().unwrap_or(true) || events.is_minimized().unwrap_or(false),
-        ),
+        WindowEvent::Focused(_) => {
+            super::background(
+                &events,
+                !events.is_visible().unwrap_or(true) || events.is_minimized().unwrap_or(false),
+            );
+            super::report_window_state(&events, &previous_chrome);
+        }
+        WindowEvent::Resized(_) => super::report_window_state(&events, &previous_chrome),
         _ => {}
     });
     Ok(())
