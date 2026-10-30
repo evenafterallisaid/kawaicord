@@ -6,6 +6,8 @@ export interface MediaReport {
   discordVoiceSupported?: boolean;
   audioContext?: string;
   receivedBytes?: number;
+  durationMs?: number;
+  maxProbeGapMs?: number;
   error?: string;
 }
 
@@ -25,7 +27,8 @@ export function mediaCapabilities(): MediaReport {
   return report;
 }
 
-export async function testAudioTransport(): Promise<MediaReport> {
+export async function testAudioTransport(minimumDurationMs = 0): Promise<MediaReport> {
+  minimumDurationMs = Number.isFinite(minimumDurationMs) ? Math.min(375000, Math.max(0, minimumDurationMs)) : 0;
   const report = mediaCapabilities();
   report.ok = false;
   let context: AudioContext | undefined;
@@ -81,20 +84,28 @@ export async function testAudioTransport(): Promise<MediaReport> {
     await a.setRemoteDescription(b.localDescription!);
     for (const candidate of candidatesA) await a.addIceCandidate(candidate);
     const samples = new Float32Array(analyser.fftSize);
-    const deadline = performance.now() + 15000;
+    const deadline = performance.now() + minimumDurationMs + 15000;
+    let firstAudio: number | undefined;
+    let previousProbe = performance.now(), lastProgress = previousProbe, lastBytes = 0;
+    report.maxProbeGapMs = 0;
     while (performance.now() < deadline) {
+      const now = performance.now();
+      report.maxProbeGapMs = Math.max(report.maxProbeGapMs, now - previousProbe); previousProbe = now;
       const stats = await b.getStats();
       let bytes = 0;
       stats.forEach(value => {
         if (value.type === 'inbound-rtp' && (value.kind === 'audio' || value.mediaType === 'audio')) bytes += value.bytesReceived ?? 0;
       });
       analyser.getFloatTimeDomainData(samples);
+      if (bytes > lastBytes) { lastBytes = bytes; lastProgress = now; }
+      if (now - lastProgress > 15000 || report.maxProbeGapMs > 15000) throw new Error('Audio transport stalled during the diagnostic');
       if (bytes > 0 && samples.some(value => Math.abs(value) > 0.001)) {
-        report.ok = true;
+        firstAudio ??= now;
         report.receivedBytes = bytes;
-        break;
+        report.durationMs = now - firstAudio;
+        if (report.durationMs >= minimumDurationMs) { report.ok = true; break; }
       }
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, minimumDurationMs ? 500 : 100));
     }
     if (!report.ok) throw new Error(`Audio transport failed (${a.connectionState}/${b.connectionState})`);
   } catch (error) {

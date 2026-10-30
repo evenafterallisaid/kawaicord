@@ -236,9 +236,11 @@ async function diagnose(record: ClientWindow, status: any) {
     saveJson(join(profile, 'media.json'), report); console.log(JSON.stringify(report)); await quit(report.ok ? 0 : 1); return;
   }
   if (flag('--background-test')) {
-    const start=Date.now(); record.window.hide(); await new Promise(resolve=>setTimeout(resolve,370000));
+    const start=Date.now();
+    await evaluate(record,'window.__kawaicordBackgroundProbe=window.__kawaicordTestAudio(370000); true');
+    record.window.hide(); status.backgroundAudio=await evaluate(record,'window.__kawaicordBackgroundProbe');
     status.backgroundElapsed=Date.now()-start; status.backgroundHidden=await evaluate(record,'document.hidden'); status.ready=await evaluate(record,'!!window.shelter&&Object.keys(window.Vencord?.Webpack?.cache||{}).length>100');
-    saveJson(join(profile,'runtime.json'),status); await quit(status.ready&&status.backgroundHidden?0:1); return;
+    saveJson(join(profile,'runtime.json'),status); await quit(status.ready&&status.backgroundHidden&&status.backgroundAudio.ok?0:1); return;
   }
   if (flag('--integration-test')) {
     record.window.show();
