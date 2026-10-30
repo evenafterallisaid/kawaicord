@@ -127,6 +127,9 @@ impl Core {
             "report_runtime" => {
                 let status = args["status"].clone();
                 config::save_json(&self.profile.join("runtime.json"), &status)?;
+                if status["ready"] == true {
+                    core_updater::cleanup_backup(&self.profile);
+                }
                 *self.runtime.lock().unwrap() = status;
                 rpc::replay(&self.host());
                 if self.config.lock().unwrap().auto_update_mods && !self.smoke {
@@ -218,7 +221,6 @@ async fn run(profile: PathBuf) -> Result<(), String> {
         smoke: std::env::args().any(|arg| arg == "--smoke-test"),
     });
     core.recovery(false)?;
-    core_updater::cleanup_backup(&core.profile);
     core.configure_rpc().await;
     output.send(json!({"event":"ready","config":core.config.lock().unwrap().clone(),"window":saved,"safeMode":safe,"version":env!("CARGO_PKG_VERSION")}));
     let mut stdin = BufReader::new(tokio::io::stdin());

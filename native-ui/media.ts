@@ -9,6 +9,7 @@ export interface MediaReport {
   durationMs?: number;
   maxProbeGapMs?: number;
   peakAmplitude?: number;
+  playbackError?: string;
   error?: string;
 }
 
@@ -39,6 +40,7 @@ export async function testAudioTransport(minimumDurationMs = 0): Promise<MediaRe
   let source: MediaStreamAudioSourceNode | undefined;
   let stream: MediaStream | undefined;
   let timeout: number | undefined;
+  const playback = document.createElement('audio'); playback.volume = 0;
   try {
     if (report.discordVoiceSupported === false) throw new Error('Discord does not recognize voice support in this webview');
     if (!report.encodedTransforms) throw new Error('Encrypted media APIs are unavailable in this webview');
@@ -76,6 +78,8 @@ export async function testAudioTransport(minimumDurationMs = 0): Promise<MediaRe
     const muted = context.createGain(); muted.gain.value = 0;
     analyser.connect(muted); muted.connect(context.destination);
     b.ontrack = event => {
+      playback.srcObject = event.streams[0];
+      void playback.play().catch(error => { report.playbackError = String(error); });
       source = context!.createMediaStreamSource(event.streams[0]);
       source.connect(analyser);
     };
@@ -117,6 +121,7 @@ export async function testAudioTransport(minimumDurationMs = 0): Promise<MediaRe
     report.error = error instanceof Error ? error.message : String(error);
   } finally {
     clearTimeout(timeout);
+    playback.pause(); playback.srcObject = null;
     source?.disconnect();
     oscillator?.disconnect();
     stream?.getTracks().forEach(track => track.stop());
