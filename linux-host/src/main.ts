@@ -106,7 +106,7 @@ async function createWindow(id?: string, name = 'Kawaicord', persistent = true, 
   configureSession(ses);
   const source = await initialization(id, performanceMode);
   const saved = !id ? readJson(join(profile, 'window.json'), { width: 1180, height: 820, maximized: false }) : { width: 1100, height: 800, maximized: false };
-  const win = new BrowserWindow({ title: name.slice(0, 80), width: Math.min(10000, Math.max(800, saved.width || 1180)), height: Math.min(8000, Math.max(600, saved.height || 820)), minWidth: 800, minHeight: 600, frame: false, show: !smoke, icon, backgroundColor: '#111214', autoHideMenuBar: true, webPreferences: { preload: join(__dirname, 'preload.cjs'), session: ses, contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } });
+  const win = new BrowserWindow({ title: name.slice(0, 80), width: Math.min(10000, Math.max(800, saved.width || 1180)), height: Math.min(8000, Math.max(600, saved.height || 820)), minWidth: 800, minHeight: 600, frame: false, show: !smoke, icon, backgroundColor: '#111214', autoHideMenuBar: true, webPreferences: { preload: join(__dirname, 'preload.cjs'), session: ses, contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false, autoplayPolicy: 'no-user-gesture-required' } });
   let closed!: () => void;
   const record: ClientWindow = { window: win, initialization: source, id, name, domain, saveSession: persistent, slot, ready: false, user: null, crashes: 0, closed: new Promise(resolve => { closed = resolve; }) };
   windows.set(win.webContents.id, record); win.removeMenu();

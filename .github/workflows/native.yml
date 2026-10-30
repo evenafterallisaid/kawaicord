@@ -101,7 +101,7 @@ jobs:
       - name: chromium packaging and audio test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 libatspi2.0-0 libdrm2 libgbm1 libasound2 libfuse2 xdg-utils xvfb pulseaudio
+          sudo apt-get install -y libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 libatspi2.0-0 libdrm2 libgbm1 libasound2 libfuse2 xdg-utils xvfb pulseaudio openbox x11-utils
       - run: npm ci
       - run: npm run build
       - run: node --test tests/*.test.mjs
@@ -120,18 +120,18 @@ jobs:
       - run: node --test tests/linux-host.test.mjs
       - run: npm run package --prefix linux-host
       - name: live discord startup with all three mods
-        run: xvfb-run -a node scripts/smoke-native.mjs linux-host/release/linux-unpacked/kawaicord
+        run: xvfb-run -a node scripts/linux-session.mjs linux-host/release/linux-unpacked/kawaicord
       - name: packaged voice engine and real audio loopback
         run: |
           pulseaudio --start --exit-idle-time=-1
           pactl load-module module-null-sink sink_name=kawaicord_test
-          xvfb-run -a node scripts/smoke-native.mjs linux-host/release/linux-unpacked/kawaicord --media
+          xvfb-run -a node scripts/linux-session.mjs linux-host/release/linux-unpacked/kawaicord --media
       - name: settings, cloud, window controls, and instance isolation
         env:
           KAWAICORD_FRAME_CAPTURE: ${{ runner.temp }}/linux-titlebar.png
-        run: xvfb-run -a node scripts/smoke-native.mjs linux-host/release/linux-unpacked/kawaicord --integration
+        run: xvfb-run -a node scripts/linux-session.mjs linux-host/release/linux-unpacked/kawaicord --integration
       - name: background connection durability
-        run: xvfb-run -a node scripts/smoke-native.mjs linux-host/release/linux-unpacked/kawaicord --background
+        run: xvfb-run -a node scripts/linux-session.mjs linux-host/release/linux-unpacked/kawaicord --background
       - name: sign the linux updater
         if: inputs.release
         env:
