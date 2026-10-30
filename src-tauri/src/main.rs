@@ -444,7 +444,7 @@ async fn open_releases(app: AppHandle, window: WebviewWindow) -> Result<(), Stri
         .map_err(|e| e.to_string())
 }
 fn open_external(app: &AppHandle, url: &url::Url) {
-    if matches!(url.scheme(), "https" | "http" | "mailto") {
+    if navigation::external(url) {
         let _ = app.opener().open_url(url.as_str(), None::<&str>);
     }
 }

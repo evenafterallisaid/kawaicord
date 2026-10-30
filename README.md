@@ -52,6 +52,8 @@ first launch saves the default settings: notifications, local rpc, background dr
 
 **test audio transport** in settings runs a local synthetic audio loopback without opening the microphone or contacting another person. it checks transport, not a complete discord call or permission setup.
 
+**check spotify connection** reads the current spotify connection, active-device availability, and the last playback request’s http status. use it after a failed listen along attempt in the same app session. it does not start playback, reconnect accounts, or record access tokens, device ids, or track data. spotify app launch links are routed to the registered spotify application.
+
 recovery mode keeps shelter while skipping the client mod. use it from settings if a plugin breaks startup. a recent unclean app exit also enables recovery for that launch. slow downloads never disable a mod. on macos, a crashed web content process gets one reload, then one recovery attempt; repeated crashes stop the reload cycle and open settings.
 
 profiles and the rotating `kawaicord.log` are stored in:

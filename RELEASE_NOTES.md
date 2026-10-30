@@ -3,6 +3,7 @@ kawaicord 2.0.0. the coffee finally got a release build.
 - replaced the electron host with rust, tauri, and a small typescript bridge on macos, windows, and linux. no bundled chromium or node sidecar.
 - fixed macos identifying itself as an unknown webkit client, which made discord reject voice calls as an unsupported browser. the app now reports the installed safari version and allows incoming audio playback.
 - added the microphone and camera entitlements to signed mac builds. without them, macos denied microphone access before it could show a permission prompt.
+- restored spotify app and media launch links, which the native navigation handler was dropping. added a read-only spotify connection check that distinguishes playback rejection from lost sync without recording credentials or changing playback. this does not claim to fix spotify desktop playback bugs.
 - added a local audio transport diagnostic in settings. it uses synthetic audio, keeps the microphone closed, and sends nothing to another person.
 - cleaned up settings into background, desktop, update, and recovery sections using discord-style controls. button labels stay inside their buttons.
 - saved first-install defaults explicitly. discord stays live when hidden, notifications and local rpc are on, game scanning and login startup are off. existing preferences survive upgrades, and broken configuration files are backed up before recovery.

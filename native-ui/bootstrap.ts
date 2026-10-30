@@ -1,4 +1,5 @@
 import './media';
+import { installSpotifyDiagnostics } from './spotify';
 import { installCloudBridge } from './cloud';
 import { nameplateCompatibility } from './nameplates';
 import { instanceHelpers } from './instances';
@@ -20,6 +21,7 @@ declare global {
 const invoke = window.__TAURI_INTERNALS__.invoke.bind(window.__TAURI_INTERNALS__);
 const boot=window.__KAWAICORD_BOOT__;
 installCloudBridge(invoke);
+installSpotifyDiagnostics();
 const setStaticNameplates=nameplateCompatibility();
 window.kawaicord=Object.freeze({
   restart:()=>invoke<void>('restart_app'),reload:()=>invoke<void>('reload_discord'),

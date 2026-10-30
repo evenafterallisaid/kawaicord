@@ -1,4 +1,5 @@
 import { testAudioTransport } from './media';
+import { spotifyDiagnostics } from './spotify';
 import type { ClientMod, Config, RuntimeStatus } from './types';
 export type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 interface SettingsData { config: Config; runtime: RuntimeStatus; updater: { available: boolean; message: string } }
@@ -41,6 +42,7 @@ export function createDiscordSettings(invoke: Invoke): HTMLElement {
       const [notice, setNotice] = solid.createSignal('');
       const [update, setUpdate] = solid.createSignal(data.updater.message);
       const [available, setAvailable] = solid.createSignal(data.updater.available);
+      const [spotify, setSpotify] = solid.createSignal('Check Spotify after a failed Listen Along attempt. This reads connection state and playback response codes without changing playback.');
       const component = (name: string, props: Record<string, unknown>) => solid.createComponent(ui[name], props);
       const append = (parent: HTMLElement, ...children: any[]) => { const marker = document.createComment(''); parent.append(marker); solidWeb.insert(parent, children, marker); };
       const heading = (text: string) => component('Header', { tag: ui.HeaderTags.HeadingLG, children: text });
@@ -82,6 +84,7 @@ export function createDiscordSettings(invoke: Invoke): HTMLElement {
       }));
       }
       append(root, divider(), heading('Voice diagnostics'), text('Test local audio transport without opening your microphone or sending audio to anyone.'), buttons(button('Test audio transport', async () => { const result = await testAudioTransport(); setNotice(result.ok ? 'Local audio transport works. If Discord rejects calls, check browser compatibility and microphone permissions.' : result.error ?? 'Audio test failed.'); })));
+      append(root, divider(), heading('Spotify connection'), component('Text', { tag: ui.TextTags.textSM, style: { color: 'var(--text-muted)' }, get children() { return spotify(); } }), buttons(button('Check Spotify connection', async () => { setSpotify(spotifyDiagnostics().summary); })));
       const install = document.createElement('span');
       append(install, button('Install update and restart', async () => { setUpdate('Downloading and verifying the update…'); try { await invoke('install_update'); } catch (error) { setUpdate(String(error)); throw error; } }, true));
       solid.createEffect(() => { install.style.display = available() ? '' : 'none'; });
