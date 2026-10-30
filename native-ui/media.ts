@@ -8,6 +8,7 @@ export interface MediaReport {
   receivedBytes?: number;
   durationMs?: number;
   maxProbeGapMs?: number;
+  peakAmplitude?: number;
   error?: string;
 }
 
@@ -72,6 +73,8 @@ export async function testAudioTransport(minimumDurationMs = 0): Promise<MediaRe
       else candidatesA.push(event.candidate);
     };
     const analyser = context.createAnalyser();
+    const muted = context.createGain(); muted.gain.value = 0;
+    analyser.connect(muted); muted.connect(context.destination);
     b.ontrack = event => {
       source = context!.createMediaStreamSource(event.streams[0]);
       source.connect(analyser);
@@ -97,9 +100,11 @@ export async function testAudioTransport(minimumDurationMs = 0): Promise<MediaRe
         if (value.type === 'inbound-rtp' && (value.kind === 'audio' || value.mediaType === 'audio')) bytes += value.bytesReceived ?? 0;
       });
       analyser.getFloatTimeDomainData(samples);
+      report.receivedBytes = bytes;
+      report.peakAmplitude = samples.reduce((peak, value) => Math.max(peak, Math.abs(value)), 0);
       if (bytes > lastBytes) { lastBytes = bytes; lastProgress = now; }
       if (now - lastProgress > 15000 || report.maxProbeGapMs > 15000) throw new Error('Audio transport stalled during the diagnostic');
-      if (bytes > 0 && samples.some(value => Math.abs(value) > 0.001)) {
+      if (bytes > 0 && report.peakAmplitude > 0.001) {
         firstAudio ??= now;
         report.receivedBytes = bytes;
         report.durationMs = now - firstAudio;
