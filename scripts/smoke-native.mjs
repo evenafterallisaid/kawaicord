@@ -9,15 +9,16 @@ const binary = resolve(process.argv[2] ?? (process.platform === 'darwin'
   : `src-tauri/target/release/kawaicord${process.platform === 'win32' ? '.exe' : ''}`));
 const backgroundTest = process.argv.includes('--background');
 const integrationTest = process.argv.includes('--integration');
+const linkTest = process.argv.includes('--links');
 const mediaPreflight = process.argv.includes('--media-preflight');
 const mediaTest = process.argv.includes('--media') || mediaPreflight;
-for (const activeMod of integrationTest ? ['illegalcord'] : backgroundTest || mediaTest ? ['vencord'] : ['vencord', 'equicord', 'illegalcord']) {
+for (const activeMod of linkTest ? ['equicord'] : integrationTest ? ['illegalcord'] : backgroundTest || mediaTest ? ['vencord'] : ['vencord', 'equicord', 'illegalcord']) {
   const profile = await mkdtemp(join(tmpdir(), 'kawaicord-smoke-'));
   let failed = false;
   try {
     await writeFile(join(profile, 'config.json'), JSON.stringify({ activeMod, richPresence: false,
       autoUpdateMods: false, autoUpdateApp: false, notifications: false, startAtLogin: false }));
-    const child = spawn(binary, ['--smoke-test', '--profile', profile, ...(backgroundTest ? ['--background-test'] : []), ...(integrationTest ? ['--integration-test'] : []), ...(mediaTest ? ['--media-test'] : []), ...(mediaPreflight ? ['--media-preflight'] : [])], {
+    const child = spawn(binary, ['--smoke-test', '--profile', profile, ...(backgroundTest ? ['--background-test'] : []), ...(integrationTest ? ['--integration-test'] : []), ...(linkTest ? ['--link-test'] : []), ...(mediaTest ? ['--media-test'] : []), ...(mediaPreflight ? ['--media-preflight'] : [])], {
       stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WEBKIT_DISABLE_DMABUF_RENDERER: '1' }
     });
     let output = '';
@@ -31,8 +32,8 @@ for (const activeMod of integrationTest ? ['illegalcord'] : backgroundTest || me
     try { status = JSON.parse(await readFile(join(profile, 'runtime.json'), 'utf8')); }
     catch { throw new Error(`${activeMod} produced no startup report (exit ${code})\n${output}`); }
     let integration;
-    if (integrationTest) {
-      try { integration = JSON.parse(await readFile(join(profile, 'integration.json'), 'utf8')); }
+    if (integrationTest || linkTest) {
+      try { integration = JSON.parse(await readFile(join(profile, linkTest ? 'links.json' : 'integration.json'), 'utf8')); }
       catch { integration = { ok: false, error: 'no integration report' }; }
     }
     let media;
@@ -52,7 +53,7 @@ for (const activeMod of integrationTest ? ['illegalcord'] : backgroundTest || me
       assert.equal(status.backgroundHidden, true); assert.ok(status.backgroundElapsed >= 370000);
       if (process.platform === 'linux') { assert.equal(status.backgroundAudio?.ok, true); assert.ok(status.backgroundAudio.durationMs >= 370000); assert.equal(status.backgroundDecorationsPaused, true); }
     }
-    if (integrationTest) { assert.equal(integration.ok, true, JSON.stringify(integration)); console.log(JSON.stringify(integration)); }
+    if (integrationTest || linkTest) { assert.equal(integration.ok, true, JSON.stringify(integration)); console.log(JSON.stringify(integration)); }
     if (mediaTest) {
       assert.equal(media.ok, true, JSON.stringify(media));
       assert.equal(media.peerConnection, true);

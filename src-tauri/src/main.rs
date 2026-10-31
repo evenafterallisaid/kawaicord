@@ -412,6 +412,10 @@ fn report_runtime(
             tauri::async_runtime::spawn(diagnostics::run(app.clone(), window.clone()));
             return Ok(());
         }
+        if std::env::args().any(|a| a == "--link-test") && status.ready {
+            tauri::async_runtime::spawn(diagnostics::run_links(app.clone(), window.clone()));
+            return Ok(());
+        }
         if std::env::args().any(|a| a == "--background-test")
             && status.ready
             && status.background_elapsed.is_none()
@@ -744,7 +748,11 @@ fn main() {
     };
     let builder = builder
         .plugin(tauri_plugin_autostart::Builder::new().build())
-        .plugin(tauri_plugin_opener::init())
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updater::Updates::default())

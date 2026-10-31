@@ -32,8 +32,8 @@ pub fn external(url: &Url) -> bool {
 }
 
 // wkwebview sends subframe navigations through the same callback as the main
-// document. captcha frames must stay embedded so their parent can receive the
-// completion message. ipc permissions remain restricted to discord.com.
+// document. previews and captchas stay embedded; navigation callbacks never
+// launch external applications. ipc permissions remain restricted to discord.com.
 pub fn embedded(url: &Url) -> bool {
     if matches!(url.as_str(), "about:blank" | "about:srcdoc") {
         return true;

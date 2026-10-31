@@ -38,7 +38,12 @@ async fn instance_ready(app: &AppHandle, id: &str) -> Result<WebviewWindow, Stri
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
-    Err(format!("Instance {id} did not finish loading"))
+    let detail = if let Some(window) = app.get_webview_window(&label) {
+        evaluate(&window, "JSON.stringify({origin:location.origin,path:location.pathname,title:document.title,bridge:!!window.kawaicord,shelter:!!window.shelter,modules:Object.keys(window.Vencord?.Webpack?.cache||{}).length})").await.unwrap_or_else(|error| json!({"probeError":error}))
+    } else {
+        json!({"missingWindow":true})
+    };
+    Err(format!("Instance {id} did not finish loading: {detail}"))
 }
 
 pub async fn run(app: AppHandle, main: WebviewWindow) {
@@ -53,7 +58,7 @@ pub async fn run(app: AppHandle, main: WebviewWindow) {
     super::clean_exit(&app);
     app.exit(code);
 }
-async fn check(app: &AppHandle, main: &WebviewWindow) -> Result<Value, String> {
+async fn check_links(app: &AppHandle, main: &WebviewWindow) -> Result<(), String> {
     let before = app
         .state::<super::AppState>()
         .external_opens
@@ -82,6 +87,23 @@ async fn check(app: &AppHandle, main: &WebviewWindow) -> Result<Value, String> {
     {
         return Err("An intentional external link did not reach the opener".into());
     }
+    Ok(())
+}
+pub async fn run_links(app: AppHandle, main: WebviewWindow) {
+    let result = check_links(&app, &main).await;
+    let report = match &result {
+        Ok(()) => json!({"ok":true,"previewDidNotOpenBrowser":true,"intentionalExternalLink":true}),
+        Err(error) => json!({"ok":false,"error":error}),
+    };
+    let _ = super::config::save_json(
+        &app.state::<super::AppState>().profile.join("links.json"),
+        &report,
+    );
+    super::clean_exit(&app);
+    app.exit(if result.is_ok() { 0 } else { 1 });
+}
+async fn check(app: &AppHandle, main: &WebviewWindow) -> Result<Value, String> {
+    check_links(app, main).await?;
     #[cfg(target_os = "windows")]
     {
         main.show().map_err(|error| error.to_string())?;
