@@ -18,7 +18,7 @@ function start(attempt = 0) {
     resume: async () => { await Spicetify.Platform.PlayerAPI.resume(); }, pause: async () => { await Spicetify.Platform.PlayerAPI.pause(); }
   }, (revision, result) => {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ revision, result }));
-    if (result === 'error') Spicetify.showNotification('Kawaicord could not start local Spotify playback. Listen Along was stopped.', true);
+    if (result === 'error') Spicetify.showNotification('Kawaicord could not start local Spotify playback. Check Spotify, then retry Listen Along.', true);
   });
   const listeners = [['songchange', 'song'], ['onplaypause', 'pause'], ['onprogress', 'progress']] as const;
   for (const [event, kind] of listeners) player.addEventListener(event, () => controller.observe(kind));

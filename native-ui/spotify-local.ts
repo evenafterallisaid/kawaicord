@@ -5,26 +5,28 @@ let timer: ReturnType<typeof setTimeout> | undefined, previous = '', wasFollowin
 let deadline = 0, needsRestart = false, presenceSignature = '';
 let lastStatus: SpotifyBridgeStatus | undefined;
 let hostPresenceObserved = false;
+let playbackAttempt = 0, remotePending = false;
 const common = () => (window.Vencord?.Webpack as any)?.Common;
 async function command(request: Record<string, unknown>) {
   if (!invoke) return;
   try { return lastStatus = await invoke<SpotifyBridgeStatus>('spotify_bridge', { request }); }
   catch (error) { lastStatus = { connected: false, outcome: 'error', message: String(error) }; }
 }
-function publish(restart = false) {
+function publish(restart = false, pending = remotePending) {
   if (!enabled) return;
   const store = common()?.SpotifyStore, sync = store?.getSyncingWith?.();
   if (!sync) return;
+  const startMs = Number(sync.startTime);
   const socket = store.getActiveSocketAndDevice?.()?.socket;
-  if (socket?.isPremium !== true || !/^[a-zA-Z0-9]{22}$/.test(sync.trackId) || !Number.isSafeInteger(sync.startTime)) return;
+  if (socket?.isPremium !== true || !/^[a-zA-Z0-9]{22}$/.test(sync.trackId) || !Number.isSafeInteger(startMs)) return;
   const activity = common()?.PresenceStore?.getActivities?.(sync.userId)?.find((value: any) => value.sync_id === sync.trackId);
   if (activity) hostPresenceObserved = true;
   if (activity?.metadata?.type && activity.metadata.type !== 'track') return;
   const duration = activity?.timestamps?.end - activity?.timestamps?.start;
-  const snapshot = { session, uri: `spotify:track:${sync.trackId}`, startMs: sync.startTime, durationMs: Number.isSafeInteger(duration) && duration > 0 && duration <= 3_600_000 ? duration : 0, paused: hostPresenceObserved && !activity };
-  const serialized = JSON.stringify(snapshot);
+  const snapshot = { session, uri: `spotify:track:${sync.trackId}`, startMs, durationMs: Number.isSafeInteger(duration) && duration > 0 && duration <= 3_600_000 ? duration : 0, paused: hostPresenceObserved && !activity };
+  const serialized = JSON.stringify({ snapshot, pending });
   if (!restart && serialized === previous) return;
-  previous = serialized; void command({ action: 'publish', snapshot, restart });
+  previous = serialized; void command({ action: 'publish', snapshot, restart, pending });
 }
 function schedule(delay: number, restart = false) {
   needsRestart ||= restart;
@@ -33,13 +35,21 @@ function schedule(delay: number, restart = false) {
   if (timer) clearTimeout(timer);
   deadline = due; timer = setTimeout(() => { timer = undefined; deadline = 0; const force = needsRestart; needsRestart = false; publish(force); }, delay);
 }
-export function spotifyPlaybackCompleted() { if (enabled && common()?.SpotifyStore?.getSyncingWith?.()) schedule(150, true); }
+function cancelScheduled() { if (timer) clearTimeout(timer); timer = undefined; deadline = 0; needsRestart = false; }
+export function spotifyPlaybackBeginning(attempt: number) {
+  playbackAttempt = attempt; remotePending = true;
+  if (enabled) queueMicrotask(() => { if (remotePending && playbackAttempt === attempt) publish(false, true); });
+}
+export function spotifyPlaybackCompleted(attempt = playbackAttempt) {
+  if (attempt === playbackAttempt) remotePending = false;
+  if (!remotePending && enabled && common()?.SpotifyStore?.getSyncingWith?.()) schedule(150, true);
+}
 export function spotifyLocalStatus() { return lastStatus; }
 export async function refreshSpotifyLocal() { if (enabled) await command({ action: 'status' }); }
 export function configureSpotifyLocal(value: boolean) {
   const changed = value !== enabled;
   enabled = value; previous = '';
-  if (!value && timer) { clearTimeout(timer); timer = undefined; }
+  if (!value) cancelScheduled();
   if (invoke && (value || changed)) void command({ action: value ? 'status' : 'stop' });
 }
 export function installSpotifyLocal(bridge: Invoke, value: boolean) {
@@ -51,7 +61,7 @@ export function installSpotifyLocal(bridge: Invoke, value: boolean) {
   if (installed || typeof stores?.SpotifyStore?.addChangeListener !== 'function' || typeof stores?.FluxDispatcher?.subscribe !== 'function') return;
   installed = true;
   window.addEventListener?.('pagehide', () => configureSpotifyLocal(false), { once: true });
-  const started = () => { session = `${Date.now()}-${++generation}`; previous = ''; hostPresenceObserved = false; presenceSignature = ''; if (enabled) schedule(1000, true); };
+  const started = () => { cancelScheduled(); session = `${Date.now()}-${++generation}`; previous = ''; hostPresenceObserved = false; presenceSignature = ''; if (enabled) schedule(1000, true); };
   stores.FluxDispatcher.subscribe('ACTIVITY_SYNC', started);
   stores.PresenceStore?.addChangeListener?.(() => {
     const sync = stores.SpotifyStore.getSyncingWith?.();
@@ -63,8 +73,7 @@ export function installSpotifyLocal(bridge: Invoke, value: boolean) {
   stores.SpotifyStore.addChangeListener(() => {
     const following = !!stores.SpotifyStore.getSyncingWith?.();
     if (following && !wasFollowing && !session) started();
-    if (!following && wasFollowing) { session = ''; previous = ''; if (timer) clearTimeout(timer); if (enabled) void command({ action: 'stop' }); }
+    if (!following && wasFollowing) { session = ''; previous = ''; cancelScheduled(); if (enabled) void command({ action: 'stop' }); }
     wasFollowing = following;
   });
-  (window as any).__kawaicordSpotifyStop = () => { if (stores.SpotifyStore.getSyncingWith?.()) stores.FluxDispatcher.dispatch({ type: 'ACTIVITY_SYNC_STOP' }); };
 }

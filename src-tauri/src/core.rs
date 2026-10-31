@@ -124,14 +124,7 @@ impl Core {
                 let request: spotify_bridge::Request =
                     serde_json::from_value(args["request"].clone()).map_err(|e| e.to_string())?;
                 let enabled = !self.smoke && self.config.lock().unwrap().spotify_local_playback;
-                let output = self.output.clone();
-                let status = spotify_bridge::request(
-                    &self.profile,
-                    enabled,
-                    request,
-                    Arc::new(move || output.send(json!({"event":"spotify-stop"}))),
-                )
-                .await?;
+                let status = spotify_bridge::request(&self.profile, enabled, request).await?;
                 serde_json::to_value(status).map_err(|e| e.to_string())
             }
             "cloud_request" => {

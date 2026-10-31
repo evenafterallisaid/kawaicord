@@ -311,7 +311,6 @@ async fn configure_rpc(app: &AppHandle) {
 }
 #[tauri::command]
 async fn spotify_bridge(
-    app: AppHandle,
     window: WebviewWindow,
     state: State<'_, AppState>,
     request: spotify_bridge::Request,
@@ -326,12 +325,7 @@ async fn spotify_bridge(
             .lock()
             .map_err(|e| e.to_string())?
             .spotify_local_playback;
-    let callback = Arc::new(move || {
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.eval("window.__kawaicordSpotifyStop?.()");
-        }
-    });
-    spotify_bridge::request(&state.profile, enabled, request, callback).await
+    spotify_bridge::request(&state.profile, enabled, request).await
 }
 #[tauri::command]
 async fn save_config(

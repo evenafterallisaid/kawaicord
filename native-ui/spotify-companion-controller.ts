@@ -1,5 +1,5 @@
 export interface ListeningTarget { session: string; uri: string; startMs: number; durationMs: number; paused?: boolean }
-export interface ListeningFrame { revision: number; snapshot: ListeningTarget | null; restart?: boolean }
+export interface ListeningFrame { revision: number; snapshot: ListeningTarget | null; restart?: boolean; pending?: boolean }
 export interface LocalPlayer {
   uri(): string | undefined; playing(): boolean; position(): number; duration(): number;
   play(uri: string): Promise<void>; seek(ms: number): Promise<void>; resume(): Promise<void>; pause(): Promise<void>;
@@ -14,6 +14,7 @@ export class LocalListeningController {
   private previousPosition = 0;
   private previousDuration = 0;
   private ownedSession = '';
+  private transitioningFrom: string | undefined;
   private waiters = new Set<() => void>();
   constructor(private player: LocalPlayer, private report: (revision: number, result: string) => void, private now = Date.now) {}
   update(frame: ListeningFrame) {
@@ -22,6 +23,7 @@ export class LocalListeningController {
     this.frame = frame;
     if (!frame.snapshot) { this.pending = false; this.ownedSession = ''; this.wake(); return; }
     if (frame.snapshot.session === this.blocked) return;
+    if (frame.pending) { this.transitioningFrom = this.player.uri(); this.pending = false; this.wake(); return; }
     this.pending = true; this.wake(); void this.pump();
   }
   disconnect() { this.frame = { revision: -1, snapshot: null }; this.pending = false; this.ownedSession = ''; this.wake(); }
@@ -64,6 +66,7 @@ export class LocalListeningController {
           await this.waitForState(frame, true);
           if (this.frame !== frame) continue;
           this.lastSeek = this.now();
+          this.previousPosition = this.player.position(); this.previousDuration = this.player.duration();
           this.report(frame.revision, 'playing');
         } catch {
           if (this.frame === frame) { this.blocked = target.session; this.report(frame.revision, 'error'); }
@@ -75,7 +78,10 @@ export class LocalListeningController {
     this.wake();
     const frame = this.frame, target = frame.snapshot;
     if (!target || target.paused || target.session === this.blocked || this.applying) return;
-    const changed = this.player.uri() !== target.uri, paused = !this.player.playing();
+    const uri = this.player.uri();
+    // a blank player is the failure being repaired, not a user's chosen replacement track.
+    if (!uri || frame.pending && uri === this.transitioningFrom && uri !== target.uri) return;
+    const changed = uri !== target.uri, paused = !this.player.playing();
     if ((kind === 'song' && changed) || (kind === 'pause' && paused)) {
       // a natural track boundary gets a short handover window for the next presence update.
       if (this.previousDuration > 0 && this.previousPosition >= this.previousDuration - 1500) {
@@ -83,7 +89,7 @@ export class LocalListeningController {
       } else this.release(frame);
       return;
     }
-    if (kind !== 'progress') return;
+    if (kind !== 'progress' || frame.pending) return;
     this.previousPosition = this.player.position(); this.previousDuration = this.player.duration();
     if (changed || paused || this.now() - this.lastSeek < 10_000) return;
     if (Math.abs(this.player.position() - this.position(target)) > 2500) {

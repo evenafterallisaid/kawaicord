@@ -10,7 +10,7 @@ function fixture(enabled){
   const dispatcher={subscribe:(name,fn)=>events[name]=fn,dispatch:()=>{sync=null;changes();}};
   const window={Vencord:{Webpack:{Common:{SpotifyStore:store,FluxDispatcher:dispatcher,PresenceStore:{getActivities:()=>activities,addChangeListener:fn=>presenceChanged=fn}}}}};
   const module={exports:{}};
-  vm.runInNewContext(bundle.outputFiles[0].text,{module,window,setTimeout:fn=>{timers.set(++timerId,fn);return timerId;},clearTimeout:id=>timers.delete(id)});
+  vm.runInNewContext(bundle.outputFiles[0].text,{module,window,queueMicrotask,setTimeout:fn=>{timers.set(++timerId,fn);return timerId;},clearTimeout:id=>timers.delete(id)});
   module.exports.installSpotifyLocal(async(command,args)=>{calls.push([command,args]);return{connected:true,outcome:'idle',message:'connected'};},enabled);
   return{api:module.exports,calls,join(){sync={userId:'private-friend',trackId:'0123456789abcdefghijkl',startTime:10000};events.ACTIVITY_SYNC();changes();},stop(){sync=null;changes();},pauseHost(){activities=[];presenceChanged();},flush(){const pending=[...timers.values()];timers.clear();pending.forEach(fn=>fn());},timers};
 }
@@ -27,4 +27,15 @@ test('another remote response reapplies the current target after it blanks the l
   const f=fixture(true);f.join();f.api.spotifyPlaybackCompleted();f.flush();const first=f.calls.at(-1)[1].request.snapshot;
   f.api.spotifyPlaybackCompleted();f.flush();assert.equal(f.calls.at(-1)[1].request.action,'publish');assert.deepEqual(f.calls.at(-1)[1].request.snapshot,first);
   assert.equal(f.calls.filter(call=>call[1].request.action==='publish').length,2);assert.equal(f.calls.at(-1)[1].request.restart,true);
+});
+test('stopping with a pending timer does not prevent joining a later session',()=>{
+  const f=fixture(true);f.join();f.stop();assert.equal(f.timers.size,0);f.join();f.api.spotifyPlaybackCompleted();f.flush();
+  assert.equal(f.calls.at(-1)[1].request.action,'publish');assert.equal(f.calls.at(-1)[1].request.pending,false);
+});
+test('in-flight playback marks the transition and an older response cannot finish a newer request',async()=>{
+  const f=fixture(true);f.join();f.api.spotifyPlaybackBeginning(1);await Promise.resolve();
+  assert.equal(f.calls.at(-1)[1].request.pending,true);
+  f.api.spotifyPlaybackBeginning(2);await Promise.resolve();f.api.spotifyPlaybackCompleted(1);f.flush();
+  assert.equal(f.calls.at(-1)[1].request.pending,true);
+  f.api.spotifyPlaybackCompleted(2);f.flush();assert.equal(f.calls.at(-1)[1].request.pending,false);
 });

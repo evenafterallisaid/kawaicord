@@ -26,7 +26,6 @@ use tokio_tungstenite::{
 const PORT: u16 = 19779;
 const ROUTE: &str = "/kawaicord-listen-along";
 const EXTENSION: &str = "kawaicordListenAlong.js";
-type Stop = Arc<dyn Fn() + Send + Sync>;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -68,6 +67,8 @@ pub enum Request {
         snapshot: Snapshot,
         #[serde(default)]
         restart: bool,
+        #[serde(default)]
+        pending: bool,
     },
     Stop,
     Install,
@@ -84,6 +85,7 @@ struct Frame {
     revision: u64,
     snapshot: Option<Snapshot>,
     restart: bool,
+    pending: bool,
 }
 struct Service {
     shutdown: watch::Sender<bool>,
@@ -101,7 +103,6 @@ struct Bridge {
     connected: AtomicBool,
     blocked: Mutex<Option<String>>,
     outcome: Mutex<String>,
-    on_stop: Mutex<Option<Stop>>,
 }
 fn bridge() -> &'static Arc<Bridge> {
     static VALUE: OnceLock<Arc<Bridge>> = OnceLock::new();
@@ -112,7 +113,6 @@ fn bridge() -> &'static Arc<Bridge> {
             connected: AtomicBool::new(false),
             blocked: Default::default(),
             outcome: Mutex::new("idle".into()),
-            on_stop: Default::default(),
         })
     })
 }
@@ -166,14 +166,8 @@ pub async fn disable() {
         f.snapshot = None;
     });
     *b.blocked.lock().unwrap() = None;
-    *b.on_stop.lock().unwrap() = None;
 }
-pub async fn request(
-    profile: &Path,
-    enabled: bool,
-    request: Request,
-    on_stop: Stop,
-) -> Result<Status, String> {
+pub async fn request(profile: &Path, enabled: bool, request: Request) -> Result<Status, String> {
     if matches!(request, Request::Install) {
         let profile = profile.to_owned();
         let message = tokio::task::spawn_blocking(move || install(&profile))
@@ -186,7 +180,6 @@ pub async fn request(
         return Ok(status("Local Spotify playback is disabled."));
     }
     let b = bridge();
-    *b.on_stop.lock().unwrap() = Some(on_stop);
     let mut service = b.service.lock().await;
     if service.is_none() {
         let pairing = key(profile)?;
@@ -225,18 +218,23 @@ pub async fn request(
     }
     drop(service);
     match request {
-        Request::Publish { snapshot, restart } => {
+        Request::Publish {
+            snapshot,
+            restart,
+            pending,
+        } => {
             if !snapshot.valid() {
                 return Err("Invalid or expired Spotify listening target".into());
             }
             if b.blocked.lock().unwrap().as_ref() != Some(&snapshot.session) {
                 b.frame.send_if_modified(|f| {
-                    if !restart && f.snapshot.as_ref() == Some(&snapshot) {
+                    if !restart && f.snapshot.as_ref() == Some(&snapshot) && f.pending == pending {
                         false
                     } else {
                         f.revision += 1;
                         f.snapshot = Some(snapshot);
                         f.restart = restart;
+                        f.pending = pending;
                         true
                     }
                 });
@@ -306,7 +304,6 @@ async fn peer(
                             if ack.result=="manual-stop" || ack.result=="error" {
                                 *b.blocked.lock().unwrap()=b.frame.borrow().snapshot.as_ref().map(|s|s.session.clone());
                                 b.frame.send_modify(|f|{f.revision+=1;f.snapshot=None;f.restart=false;});
-                                if let Some(callback)=b.on_stop.lock().unwrap().clone(){callback();}
                             }
                         },
                         Message::Close(_)=>return,
@@ -419,12 +416,7 @@ mod tests {
             u64::from_le_bytes(entropy)
         ));
         std::fs::create_dir(&folder).unwrap();
-        let stopped = Arc::new(tokio::sync::Notify::new());
-        let signal = stopped.clone();
-        let callback: Stop = Arc::new(move || signal.notify_one());
-        request(&folder, true, Request::Status, callback.clone())
-            .await
-            .unwrap();
+        request(&folder, true, Request::Status).await.unwrap();
         let pairing = key(&folder).unwrap();
         let mut handshake = format!("ws://127.0.0.1:{PORT}{ROUTE}?key={pairing}")
             .into_client_request()
@@ -448,8 +440,8 @@ mod tests {
             Request::Publish {
                 snapshot: target.clone(),
                 restart: false,
+                pending: false,
             },
-            callback.clone(),
         )
         .await
         .unwrap();
@@ -463,8 +455,8 @@ mod tests {
             Request::Publish {
                 snapshot: target.clone(),
                 restart: true,
+                pending: false,
             },
-            callback.clone(),
         )
         .await
         .unwrap();
@@ -481,11 +473,16 @@ mod tests {
             ))
             .await
             .unwrap();
-        tokio::time::timeout(Duration::from_secs(2), stopped.notified())
-            .await
-            .unwrap();
-        let stopped_frame: serde_json::Value =
-            serde_json::from_str(socket.next().await.unwrap().unwrap().to_text().unwrap()).unwrap();
+        let stopped_frame: serde_json::Value = serde_json::from_str(
+            tokio::time::timeout(Duration::from_secs(2), socket.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap()
+                .to_text()
+                .unwrap(),
+        )
+        .unwrap();
         assert!(stopped_frame["snapshot"].is_null());
         revision = stopped_frame["revision"].as_u64().unwrap();
         target.uri = "spotify:track:1123456789abcdefghijkl".into();
@@ -495,8 +492,8 @@ mod tests {
             Request::Publish {
                 snapshot: target.clone(),
                 restart: false,
+                pending: false,
             },
-            callback.clone(),
         )
         .await
         .unwrap();
@@ -508,8 +505,8 @@ mod tests {
             Request::Publish {
                 snapshot: target.clone(),
                 restart: false,
+                pending: false,
             },
-            callback,
         )
         .await
         .unwrap();

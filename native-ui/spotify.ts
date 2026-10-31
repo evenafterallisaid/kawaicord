@@ -1,4 +1,4 @@
-import { spotifyPlaybackCompleted, spotifyLocalStatus } from './spotify-local';
+import { spotifyPlaybackBeginning, spotifyPlaybackCompleted, spotifyLocalStatus } from './spotify-local';
 interface SpotifyRequest { endpoint: string; method: string; status: number; at: number }
 const endpoints = new Set(['/v1/me/player', '/v1/me/player/play', '/v1/me/player/devices', '/v1/me/player/seek']);
 let latestPlay: SpotifyRequest | undefined;
@@ -19,10 +19,11 @@ export function installSpotifyDiagnostics() {
   const begin = (endpoint: string | undefined, method: string) => {
     if (endpoint !== '/v1/me/player/play' || method !== 'PUT') return 0;
     latestPlay = { endpoint, method, status: -1, at: Date.now() };
-    return ++sequence;
+    spotifyPlaybackBeginning(++sequence);
+    return sequence;
   };
   const complete = (attempt: number, status: number) => {
-    if (attempt) { if (attempt === sequence && latestPlay) latestPlay.status = status; spotifyPlaybackCompleted(); }
+    if (attempt) { if (attempt === sequence && latestPlay) latestPlay.status = status; spotifyPlaybackCompleted(attempt); }
   };
   const originalFetch = window.fetch;
   window.fetch = async function(input, init) {

@@ -69,3 +69,12 @@ test('an explicit repair restarts a broken context even if Spotify still reports
   f.state.playing=false;f.controller.observe('pause');
   const blocked=f.frame(3,b);blocked.restart=true;f.controller.update(blocked);await flush();assert.equal(f.calls.length,4);
 });
+test('remote playback can blank the player or change to its expected track without being treated as a manual override',async()=>{
+  const f=fixture();f.controller.update(f.frame(1,b));await flush();
+  const transition=f.frame(2,c);transition.pending=true;f.controller.update(transition);
+  f.state.uri=undefined;f.state.playing=false;f.controller.observe('song');f.controller.observe('pause');
+  assert.deepEqual(f.reports,[[1,'playing']]);
+  f.state.uri=c;f.state.playing=true;f.controller.observe('song');
+  const finished=f.frame(3,c);finished.restart=true;f.controller.update(finished);await flush();assert.deepEqual(f.reports.at(-1),[3,'playing']);
+  const next=f.frame(4,b);next.pending=true;f.controller.update(next);f.state.uri=a;f.controller.observe('song');assert.deepEqual(f.reports.at(-1),[4,'manual-stop']);
+});

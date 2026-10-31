@@ -209,7 +209,7 @@ ipcMain.handle('kawaicord:invoke', async (event, command: string, data: Record<s
     case 'save_config': {
       const oldStartup = config.startAtLogin; config = await core.request(command, data); scriptCache.clear();
       setTray(); if (oldStartup !== config.startAtLogin) loginStartup();
-      for (const window of windows.values()) if (!window.recovery) void evaluate(window, `window.__kawaicordUpdateConfig?.(${JSON.stringify(config)})`).catch(() => {});
+      for (const window of windows.values()) if (!window.recovery) void evaluate(window, `window.__kawaicordUpdateConfig?.(${JSON.stringify(window.id ? { ...config, spotifyLocalPlayback: false } : config)})`).catch(() => {});
       return config;
     }
     case 'spotify_bridge': if (record.id) throw new Error('Local Spotify playback belongs to the main window'); return core.request(command, data);
@@ -289,7 +289,6 @@ async function start() {
   const initial=await new Promise<any>((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error('Rust service startup timed out')),60000);core.once('ready',value=>{clearTimeout(timeout);resolve(value);});core.once('stopped',value=>{clearTimeout(timeout);reject(new Error(value));});});
   config=initial.config; safeMode=initial.safeMode;
   core.on('activity',event=>{if(alive(main))void evaluate(main,`window.__kawaicordActivity?.(${JSON.stringify(event.data)})`).catch(()=>{});});
-  core.on('spotify-stop',()=>{if(alive(main))void evaluate(main,'window.__kawaicordSpotifyStop?.()').catch(()=>{});});
   await createWindow(); if(!smoke)setTray();
   app.on('activate',()=>show());
   app.on('before-quit',event=>{if(!quitting){event.preventDefault();void quit();}});
