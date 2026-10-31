@@ -43,10 +43,14 @@ export function configureSpotifyLocal(value: boolean) {
   if (invoke && (value || changed)) void command({ action: value ? 'status' : 'stop' });
 }
 export function installSpotifyLocal(bridge: Invoke, value: boolean) {
-  invoke = bridge; configureSpotifyLocal(value);
+  invoke = bridge;
+  // a freshly loaded discord page must not inherit ownership from its previous session.
+  if (value) void command({ action: 'stop' });
+  configureSpotifyLocal(value);
   const stores = common();
   if (installed || typeof stores?.SpotifyStore?.addChangeListener !== 'function' || typeof stores?.FluxDispatcher?.subscribe !== 'function') return;
   installed = true;
+  window.addEventListener?.('pagehide', () => configureSpotifyLocal(false), { once: true });
   const started = () => { session = `${Date.now()}-${++generation}`; previous = ''; hostPresenceObserved = false; presenceSignature = ''; if (enabled) schedule(1000, true); };
   stores.FluxDispatcher.subscribe('ACTIVITY_SYNC', started);
   stores.PresenceStore?.addChangeListener?.(() => {

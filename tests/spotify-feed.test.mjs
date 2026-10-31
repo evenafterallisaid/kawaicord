@@ -16,7 +16,7 @@ function fixture(enabled){
 }
 test('the feed stays idle by default and sends only the selected track timing when enabled',()=>{
   const off=fixture(false);off.join();off.api.spotifyPlaybackCompleted();off.flush();assert.equal(off.calls.length,0);
-  const on=fixture(true);on.join();on.api.spotifyPlaybackCompleted();on.flush();
+  const on=fixture(true);assert.deepEqual(on.calls.slice(0,2).map(call=>call[1].request.action),['stop','status']);on.join();on.api.spotifyPlaybackCompleted();on.flush();
   const request=on.calls.at(-1);assert.equal(request[0],'spotify_bridge');assert.equal(request[1].request.action,'publish');
   const snapshot=request[1].request.snapshot;assert.equal(snapshot.uri,'spotify:track:0123456789abcdefghijkl');assert.equal(snapshot.startMs,10000);assert.equal(snapshot.durationMs,200000);
   assert.doesNotMatch(JSON.stringify(on.calls),/secret|private-friend|private-device/);
