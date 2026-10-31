@@ -19,7 +19,8 @@ test('linux privileges remain limited to discord and narrow client actions', () 
   assert.equal(policy.embedded('https://hcaptcha.com.evil.test'), false);
   assert.ok(policy.external('spotify:'));
   assert.ok(policy.external('spotify:track:1234567890123456789012'));
-  for (const url of ['file:///etc/passwd', 'javascript:alert(1)', 'spotify:app:arbitrary', 'spotify://host/track']) assert.equal(policy.external(url), false);
+  assert.ok(policy.external('spotify:track:1234567890123456789012?utm_source=discord&utm_medium=desktop'));
+  for (const url of ['file:///etc/passwd', 'javascript:alert(1)', 'spotify:app:arbitrary', 'spotify://host/track', 'spotify:track:1234567890123456789012?command=other']) assert.equal(policy.external(url), false);
   for (const id of ['../main', '', 'x'.repeat(33), 'hello/world']) assert.throws(() => policy.instanceId(id));
   assert.equal(policy.commands.has('execute_script'), false);
 });

@@ -10,7 +10,8 @@ export function external(address: string) {
   try {
     const url = new URL(address);
     if (['https:', 'http:', 'mailto:'].includes(url.protocol)) return true;
-    return url.protocol === 'spotify:' && !url.host && !url.search && !url.hash && (url.pathname === '' || /^(track|album|artist|playlist|episode|show):[a-zA-Z0-9]{22}$/.test(url.pathname));
+    const tracking = [...url.searchParams].every(([key, value]) => key === 'utm_source' && value === 'discord' || key === 'utm_medium' && ['desktop', 'user_activity_play', 'user_activity_sync', 'embed_sync'].includes(value));
+    return url.protocol === 'spotify:' && !url.host && tracking && !url.hash && (url.pathname === '' || /^(track|album|artist|playlist|episode|show):[a-zA-Z0-9]{22}$/.test(url.pathname));
   } catch { return false; }
 }
 export function instanceId(value: unknown): string {

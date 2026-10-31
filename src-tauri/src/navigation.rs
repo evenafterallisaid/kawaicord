@@ -6,8 +6,15 @@ pub fn external(url: &Url) -> bool {
     }
     if url.scheme() != "spotify"
         || url.has_host()
-        || url.query().is_some()
         || url.fragment().is_some()
+        || !url.query_pairs().all(|(key, value)| {
+            (key == "utm_source" && value == "discord")
+                || (key == "utm_medium"
+                    && matches!(
+                        value.as_ref(),
+                        "desktop" | "user_activity_play" | "user_activity_sync" | "embed_sync"
+                    ))
+        })
     {
         return false;
     }
@@ -59,6 +66,7 @@ mod tests {
             "spotify:track:0123456789abcdefghijkl",
             "spotify:playlist:0123456789abcdefghijkl",
             "https://open.spotify.com/track/example",
+            "spotify:track:0123456789abcdefghijkl?utm_source=discord&utm_medium=desktop",
         ] {
             assert!(external(&Url::parse(value).unwrap()), "{value}");
         }
@@ -67,6 +75,7 @@ mod tests {
             "spotify:track:bad",
             "spotify:track:0123456789abcdefghijkl?command=other",
             "spotify:app:other",
+            "spotify:track:0123456789abcdefghijkl?utm_source=other&command=other",
             "file:///etc/passwd",
             "javascript:alert(1)",
         ] {
