@@ -6,6 +6,7 @@ mod core_updater;
 mod games;
 mod release_feed;
 mod rpc;
+mod spotify_bridge;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -90,6 +91,9 @@ impl Core {
                 let profile = self.instance_profile(args["id"].as_str())?;
                 std::fs::create_dir_all(&profile).map_err(|error| error.to_string())?;
                 let mut config = self.config.lock().unwrap().clone();
+                if args["id"].is_string() {
+                    config.spotify_local_playback = false;
+                }
                 if let Some(value) = args["performanceMode"].as_bool() {
                     config.performance_mode = value;
                 }
@@ -111,7 +115,24 @@ impl Core {
                 *self.config.lock().unwrap() = config.clone();
                 self.changed.notify_one();
                 self.configure_rpc().await;
+                if !config.spotify_local_playback {
+                    spotify_bridge::disable().await;
+                }
                 Ok(json!(config))
+            }
+            "spotify_bridge" => {
+                let request: spotify_bridge::Request =
+                    serde_json::from_value(args["request"].clone()).map_err(|e| e.to_string())?;
+                let enabled = !self.smoke && self.config.lock().unwrap().spotify_local_playback;
+                let output = self.output.clone();
+                let status = spotify_bridge::request(
+                    &self.profile,
+                    enabled,
+                    request,
+                    Arc::new(move || output.send(json!({"event":"spotify-stop"}))),
+                )
+                .await?;
+                serde_json::to_value(status).map_err(|e| e.to_string())
             }
             "cloud_request" => {
                 let request: cloud_client::Request =

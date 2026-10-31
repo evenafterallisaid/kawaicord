@@ -1,5 +1,6 @@
 import { testAudioTransport } from './media';
 import { spotifyDiagnostics } from './spotify';
+import { refreshSpotifyLocal } from './spotify-local';
 import type { ClientMod, Config, RuntimeStatus } from './types';
 export type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 interface SettingsData { config: Config; runtime: RuntimeStatus; updater: { available: boolean; message: string } }
@@ -84,7 +85,13 @@ export function createDiscordSettings(invoke: Invoke): HTMLElement {
       }));
       }
       append(root, divider(), heading('Voice diagnostics'), text('Test local audio transport without opening your microphone or sending audio to anyone.'), buttons(button('Test audio transport', async () => { const result = await testAudioTransport(); setNotice(result.ok ? 'Local audio transport works. If Discord rejects calls, check browser compatibility and microphone permissions.' : result.error ?? 'Audio test failed.'); })));
-      append(root, divider(), heading('Spotify connection'), component('Text', { tag: ui.TextTags.textSM, style: { color: 'var(--text-muted)' }, get children() { return spotify(); } }), buttons(button('Check Spotify connection', async () => { setSpotify(spotifyDiagnostics().summary); })));
+      append(root, divider(), heading('Spotify connection'), component('Text', { tag: ui.TextTags.textSM, style: { color: 'var(--text-muted)' }, get children() { return spotify(); } }), buttons(button('Check Spotify connection', async () => { await refreshSpotifyLocal(); setSpotify(spotifyDiagnostics().summary); })));
+      append(root, component('SwitchItem', {
+        children: 'Listen Along on this computer', note: 'Use the Spotify companion to play and sync locally when Spotify accepts remote playback but stays blank. Requires Spicetify and Spotify Premium.',
+        get checked() { return config().spotifyLocalPlayback; }, get disabled() { return busy(); },
+        onChange: (value: boolean) => void act(async () => setConfig(await invoke<Config>('save_config', { config: { ...config(), spotifyLocalPlayback: value } })))
+      }), text('Companion setup adds a Spicetify extension and applies it with your existing customization. Spotify stays open; quit and reopen it afterward. Your Spicetify configuration is backed up.'),
+      buttons(button('Install Spotify companion', async () => { const result = await invoke<{message:string}>('spotify_bridge', { request: { action: 'install' } }); setSpotify(result.message); })));
       const install = document.createElement('span');
       append(install, button('Install update and restart', async () => { setUpdate('Downloading and verifying the update…'); try { await invoke('install_update'); } catch (error) { setUpdate(String(error)); throw error; } }, true));
       solid.createEffect(() => { install.style.display = available() ? '' : 'none'; });

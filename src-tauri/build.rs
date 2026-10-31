@@ -28,6 +28,7 @@ fn main() {
         "open_releases",
         "window_action",
         "open_link",
+        "spotify_bridge",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

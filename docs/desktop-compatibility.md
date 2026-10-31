@@ -52,3 +52,12 @@ the cause remains unresolved. an authenticated comparison with official discord 
 - complete local evidence bundles: `work/native-tools/spotify-desktop-rea.json` and `work/native-tools/spotify-web-rea.json`; extracted factories and provenance: `work/native-tools/spotify-rea-selected/`
 
 both passes reported zero parse failures. desktop semantic retention was bounded, and both graphs retained unresolved relationships. the findings above are supported by selected source inspection, not complete native-module coverage or an observed official-client call. the selected hosted factories were wrapped for inert parsing; their original slices and provenance remain separate from that wrapper. proprietary client code and authentication data were not added to this repository.
+
+
+## local-player candidate
+
+following that investigation, the 2.0.2 candidate implements an optional spicetify companion to start playback through spotify's own player, then seek to the host's position. the normal discord playback request is retained; a completed request can trigger a local repair. the controller treats an explicit repair separately from a timing-only update, follows track changes and host pauses, and releases the session on a manual pause or track change. a stopped session is blocked in both peers so reconnecting cannot restore it accidentally.
+
+the native host sends the selected track and timing through one paired loopback websocket to spotify's client origin. it receives only bounded result acknowledgements. spotify credentials and friend/account identifiers are not part of that protocol. the integration stays off by default and uses existing player events and pushed updates rather than an idle polling loop. additional discord instances do not own the companion.
+
+this approach is informed by the independently published [local-player workaround](https://github.com/rajb16/discord-spotify-listen-along). kawaicord's controller, transport, and installer are separate implementations. automated controller and paired-transport checks pass; an authenticated spotify playback result is still required before treating the candidate as a confirmed fix. the earlier static investigation does not replace that live check.

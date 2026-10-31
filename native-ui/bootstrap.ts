@@ -1,5 +1,6 @@
 import './media';
 import { installSpotifyDiagnostics } from './spotify';
+import { installSpotifyLocal, configureSpotifyLocal } from './spotify-local';
 import { installTitlebar } from './titlebar';
 import { installNotifications } from './notifications';
 import { installExternalLinks } from './links';
@@ -76,6 +77,7 @@ window.__kawaicordNativeStart=(css:string)=>{
     const ready=!!window.shelter&&(boot.safeMode||modules>100)&&mounted;
     if(!ready&&performance.now()-started<60000)return;
     done=true;clearInterval(timer);observer.disconnect();
+    if (ready) installSpotifyLocal(invoke, boot.config.spotifyLocalPlayback);
     const status:RuntimeStatus={activeMod:boot.activeMod,safeMode:boot.safeMode,shelter:!!window.shelter,modules,ready,
       media:typeof navigator.mediaDevices?.getUserMedia==='function',screenSharing:typeof navigator.mediaDevices?.getDisplayMedia==='function',
       error:ready?null:'Discord or the selected mod did not finish initializing. Reload or open Kawaicord settings to try recovery mode.',version:boot.version,platform:boot.platform};
@@ -87,7 +89,7 @@ export {};
 // preserve the connection in webviews that otherwise freeze a hidden page.
 // a pending web lock uses no polling timer and is released on navigation.
 if(navigator.locks)void navigator.locks.request('kawaicord-live',()=>new Promise<void>(resolve=>window.addEventListener('pagehide',()=>resolve(),{once:true}))).catch(()=>{});
-(window as any).__kawaicordUpdateConfig=(config:Config)=>{Object.assign(boot.config,config);window.__kawaicordSetBackground?.(background);setStaticNameplates(config.staticNameplates);void refreshNotificationPermission();};
+(window as any).__kawaicordUpdateConfig=(config:Config)=>{Object.assign(boot.config,config);window.__kawaicordSetBackground?.(background);setStaticNameplates(config.staticNameplates);configureSpotifyLocal(config.spotifyLocalPlayback);void refreshNotificationPermission();};
 (window as any).__kawaicordActivity=async(data:any)=>{
   const webpack:any=window.Vencord?.Webpack;
   const common=webpack?.Common;

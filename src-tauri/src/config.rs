@@ -38,6 +38,7 @@ pub struct Config {
     pub auto_update_app: bool,
     pub preview_updates: bool,
     pub notifications: bool,
+    pub spotify_local_playback: bool,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -54,6 +55,7 @@ impl Default for Config {
             auto_update_app: true,
             preview_updates: false,
             notifications: true,
+            spotify_local_playback: false,
         }
     }
 }

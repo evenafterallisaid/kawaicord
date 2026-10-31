@@ -42,7 +42,7 @@ this is an unofficial discord client. upstream client mods keep their own licens
 
 ## settings and recovery
 
-open discord settings, then choose **kawaicord → settings**. the native settings menu and `cmd+,` / `ctrl+,` open the same page.
+open discord settings with the native settings menu or `cmd+,` / `ctrl+,`, then choose **kawaicord → settings**.
 
 choose vencord, equicord, or illegalcord, then save and restart. exactly one client mod loads alongside shelter. the mods' restart buttons and the usual reload shortcuts use the native host.
 
@@ -53,6 +53,10 @@ first launch saves the default settings: notifications, local rpc, background dr
 **test audio transport** in settings runs a local synthetic audio loopback without opening the microphone or contacting another person. it checks transport, not a complete discord call or permission setup.
 
 **check spotify connection** reads the current spotify connection, active-device availability, and the last playback request’s http status. use it after a failed listen along attempt in the same app session. it does not start playback, reconnect accounts, or record access tokens, device ids, or track data. spotify app launch links are routed to the registered spotify application.
+
+**listen along on this computer** is an optional workaround for spotify desktop accepting a remote play request but showing a blank player. it requires spotify premium and an existing [spicetify installation](https://spicetify.app/). in kawaicord settings, click **install spotify companion**, quit and reopen spotify, then enable **listen along on this computer**. setup preserves a backup of your spicetify configuration, appends its extension, and applies your existing customization without restarting spotify automatically. removing the extension uses `spicetify config extensions kawaicordListenAlong.js-` followed by `spicetify apply`.
+
+the companion uses spotify's player to start the selected track and seek to the listening position. it follows track changes, handles a host pause, and gives up control if you pause or change tracks yourself. the main kawaicord window owns this integration; additional discord instances use their normal spotify behavior. the workaround is off by default. its paired connection stays on `127.0.0.1`, accepts only spotify's client origin, and carries the selected track and timing in memory. no spotify login tokens or friend/account identifiers are sent through it. it uses player events and pushed updates rather than an idle playback polling loop. the approach was informed by the independently published [local-player bridge](https://github.com/rajb16/discord-spotify-listen-along); kawaicord's implementation is separate.
 
 recovery mode keeps shelter while skipping the client mod. use it from settings if a plugin breaks startup. a recent unclean app exit also enables recovery for that launch. slow downloads never disable a mod. on macos, a crashed web content process gets one reload, then one recovery attempt; repeated crashes stop the reload cycle and open settings.
 

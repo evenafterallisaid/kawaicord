@@ -1,3 +1,4 @@
+import { spotifyPlaybackCompleted, spotifyLocalStatus } from './spotify-local';
 interface SpotifyRequest { endpoint: string; method: string; status: number; at: number }
 const endpoints = new Set(['/v1/me/player', '/v1/me/player/play', '/v1/me/player/devices', '/v1/me/player/seek']);
 let latestPlay: SpotifyRequest | undefined;
@@ -21,7 +22,7 @@ export function installSpotifyDiagnostics() {
     return ++sequence;
   };
   const complete = (attempt: number, status: number) => {
-    if (attempt && attempt === sequence && latestPlay) latestPlay.status = status;
+    if (attempt) { if (attempt === sequence && latestPlay) latestPlay.status = status; spotifyPlaybackCompleted(); }
   };
   const originalFetch = window.fetch;
   window.fetch = async function(input, init) {
@@ -88,7 +89,8 @@ export function spotifyDiagnostics(common: any = (window.Vencord?.Webpack as any
     `Premium reported by Discord: ${premium === undefined ? 'unknown' : premium ? 'yes' : 'no'}.`,
     `Listen Along: ${following ? 'active' : 'inactive'}.`,
     play ? `Last playback request: ${play.status < 0 ? 'pending' : play.status === 0 ? 'network error' : `HTTP ${play.status}`}.` : 'No playback request recorded in this session.',
-    advice
+    advice, spotifyLocalStatus()?.message,
+    spotifyLocalStatus()?.connected ? `Local player result: ${spotifyLocalStatus()?.outcome}.` : ''
   ].filter(Boolean).join(' ');
   return { connected, hasActiveDevice: !!active?.device, realtime, premium, following, play, summary };
 }

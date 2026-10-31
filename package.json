@@ -1,6 +1,6 @@
 {
   "name": "kawaicord",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "private": true,
   "description": "a native discord client with shelter and three client mods",
   "license": "MIT",

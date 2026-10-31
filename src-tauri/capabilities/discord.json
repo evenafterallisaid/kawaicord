@@ -24,6 +24,7 @@
     "allow-close-notification",
     "allow-window-action",
     "allow-open-link",
+    "allow-spotify-bridge",
     "allow-restart-recovery",
     "allow-get-settings",
     "allow-save-config",

@@ -1,6 +1,6 @@
 [package]
 name = "kawaicord"
-version = "2.0.1"
+version = "2.0.2"
 description = "A lightweight native Discord web client"
 authors = ["Kawaicord contributors"]
 edition = "2021"
@@ -43,6 +43,7 @@ semver = "1"
 url = "2"
 log = "0.4"
 env_logger = "0.11"
+getrandom = "0.3"
 minisign-verify = { version = "0.3", optional = true }
 futures-util = "0.3"
 sysinfo = { version = "0.39.6", default-features = false, features = ["system"] }

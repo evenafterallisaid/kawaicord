@@ -10,6 +10,7 @@ mod instances;
 mod navigation;
 mod release_feed;
 mod rpc;
+mod spotify_bridge;
 mod updater;
 use config::{Config, Recovery, WindowState};
 use serde::{Deserialize, Serialize};
@@ -309,6 +310,30 @@ async fn configure_rpc(app: &AppHandle) {
     }
 }
 #[tauri::command]
+async fn spotify_bridge(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    request: spotify_bridge::Request,
+) -> Result<spotify_bridge::Status, String> {
+    if window.label() != "main" {
+        return Err("Local Spotify playback belongs to the main window.".into());
+    }
+    either(&window)?;
+    let enabled = !state.smoke
+        && state
+            .config
+            .lock()
+            .map_err(|e| e.to_string())?
+            .spotify_local_playback;
+    let callback = Arc::new(move || {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.eval("window.__kawaicordSpotifyStop?.()");
+        }
+    });
+    spotify_bridge::request(&state.profile, enabled, request, callback).await
+}
+#[tauri::command]
 async fn save_config(
     app: AppHandle,
     window: WebviewWindow,
@@ -341,6 +366,9 @@ async fn save_config(
         ));
     }
     state.config_changed.notify_one();
+    if !config.spotify_local_playback {
+        spotify_bridge::disable().await;
+    }
     configure_rpc(&app).await;
     Ok(config)
 }
@@ -782,7 +810,8 @@ fn main() {
             install_update,
             open_releases,
             open_link,
-            window_action
+            window_action,
+            spotify_bridge
         ])
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => show(app),
