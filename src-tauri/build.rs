@@ -27,6 +27,7 @@ fn main() {
         "install_update",
         "open_releases",
         "window_action",
+        "open_link",
     ];
     tauri_build::try_build(
         tauri_build::Attributes::new()

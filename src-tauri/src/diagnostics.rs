@@ -54,6 +54,34 @@ pub async fn run(app: AppHandle, main: WebviewWindow) {
     app.exit(code);
 }
 async fn check(app: &AppHandle, main: &WebviewWindow) -> Result<Value, String> {
+    let before = app
+        .state::<super::AppState>()
+        .external_opens
+        .load(std::sync::atomic::Ordering::Relaxed);
+    evaluate(main,"(()=>{for(const url of ['https://open.spotify.com/embed/track/11dFghVXANMlKmJXsNCbNl','https://example.com/']){const frame=document.createElement('iframe');frame.dataset.kawaicordLinkProbe='true';frame.src=url;document.body.append(frame)}return true})()").await?;
+    tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+    if app
+        .state::<super::AppState>()
+        .external_opens
+        .load(std::sync::atomic::Ordering::Relaxed)
+        != before
+    {
+        return Err("A preview opened an external browser without a click".into());
+    }
+    evaluate(main,"(document.querySelectorAll('[data-kawaicord-link-probe]').forEach(frame=>frame.remove()),true)").await?;
+    super::open_link(
+        app.clone(),
+        main.clone(),
+        "https://open.spotify.com/track/11dFghVXANMlKmJXsNCbNl".into(),
+    )?;
+    if app
+        .state::<super::AppState>()
+        .external_opens
+        .load(std::sync::atomic::Ordering::Relaxed)
+        != before + 1
+    {
+        return Err("An intentional external link did not reach the opener".into());
+    }
     #[cfg(target_os = "windows")]
     {
         main.show().map_err(|error| error.to_string())?;
@@ -233,7 +261,7 @@ async fn check(app: &AppHandle, main: &WebviewWindow) -> Result<Value, String> {
     }
     super::instances::close_all_instances(app.clone(), main.clone()).await?;
     Ok(
-        json!({"ok":true,"separateSessionStorage":true,"clearedSessionStayedCleared":true,"temporarySessionsIsolated":true,"temporarySessionNotRestored":true,"discordSettingsRendered":true,"buttonLabelsFit":true,"oauthConfigurationLoaded":true,"nativeInstanceHelper":true}),
+        json!({"ok":true,"previewDidNotOpenBrowser":true,"intentionalExternalLink":true,"separateSessionStorage":true,"clearedSessionStayedCleared":true,"temporarySessionsIsolated":true,"temporarySessionNotRestored":true,"discordSettingsRendered":true,"buttonLabelsFit":true,"oauthConfigurationLoaded":true,"nativeInstanceHelper":true}),
     )
 }
 

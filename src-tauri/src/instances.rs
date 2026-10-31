@@ -147,7 +147,6 @@ pub async fn open_instance(
     let script =
         super::bundles::initialization(&profile(&app, &id), config.active_mod, false, &config)
             .map_err(|e| e.to_string())?;
-    let nav_app = app.clone();
     let popup_app = app.clone();
     let title = if name.trim().is_empty() {
         "Discord instance".to_owned()
@@ -165,13 +164,7 @@ pub async fn open_instance(
     .decorations(cfg!(target_os = "macos"))
     .initialization_script(script)
     .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
-    .on_navigation(move |u| {
-        let allowed = super::navigation::embedded(u);
-        if !allowed {
-            super::open_external(&nav_app, u)
-        }
-        allowed
-    })
+    .on_navigation(super::navigation::embedded)
     .on_new_window(move |u, _| {
         super::open_external(&popup_app, &u);
         tauri::webview::NewWindowResponse::Deny

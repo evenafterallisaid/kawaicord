@@ -44,6 +44,8 @@ pub fn embedded(url: &Url) -> bool {
             "discord.com" | "ptb.discord.com" | "canary.discord.com"
         ) || host == "hcaptcha.com"
             || host.ends_with(".hcaptcha.com")
+            || (host == "open.spotify.com"
+                && (url.path() == "/embed" || url.path().starts_with("/embed/")))
     })
 }
 
@@ -92,9 +94,21 @@ mod tests {
             "http://hcaptcha.com/",
             "https://hcaptcha.com:8443/",
             "https://user@hcaptcha.com/",
+            "https://open.spotify.com/track/0123456789abcdefghijkl",
+            "https://open.spotify.com/embedevil/track/example",
+            "https://open.spotify.com.evil.test/embed/track/example",
             "javascript:alert(1)",
         ] {
             assert!(!embedded(&Url::parse(url).unwrap()), "{url}");
+        }
+    }
+    #[test]
+    fn spotify_previews_are_embedded_without_becoming_external_actions() {
+        for value in [
+            "https://open.spotify.com/embed/track/0123456789abcdefghijkl",
+            "https://open.spotify.com/embed/playlist/0123456789abcdefghijkl?utm_source=generator",
+        ] {
+            assert!(embedded(&Url::parse(value).unwrap()));
         }
     }
 }

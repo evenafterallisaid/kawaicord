@@ -58,6 +58,7 @@ struct AppState {
     config_changed: Arc<tokio::sync::Notify>,
     services: tokio::sync::Mutex<Option<rpc::Service>>,
     smoke: bool,
+    external_opens: std::sync::atomic::AtomicUsize,
 }
 impl AppState {
     fn log(&self, message: &str) {
@@ -534,8 +535,25 @@ async fn open_releases(app: AppHandle, window: WebviewWindow) -> Result<(), Stri
 }
 fn open_external(app: &AppHandle, url: &url::Url) {
     if navigation::external(url) {
+        let state = app.state::<AppState>();
+        state.external_opens.fetch_add(1, Ordering::Relaxed);
+        if state.smoke {
+            return;
+        }
         let _ = app.opener().open_url(url.as_str(), None::<&str>);
     }
+}
+#[tauri::command]
+fn open_link(app: AppHandle, window: WebviewWindow, url: String) -> Result<(), String> {
+    if !trusted(&window) {
+        return Err("Untrusted renderer".into());
+    }
+    let url = url::Url::parse(&url).map_err(|error| error.to_string())?;
+    if !navigation::external(&url) {
+        return Err("Unsupported link".into());
+    }
+    open_external(&app, &url);
+    Ok(())
 }
 fn navigate_discord(window: &WebviewWindow, url: url::Url) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -570,7 +588,6 @@ fn build_discord(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let script = bundles::initialization(&state.profile, config.active_mod, safe, &config)?;
     let saved = state.window_state.lock().unwrap().clone();
     let (width, height) = saved.size();
-    let nav_app = app.clone();
     let popup_app = app.clone();
     let mut builder = tauri::WebviewWindowBuilder::new(
         app,
@@ -590,13 +607,7 @@ fn build_discord(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     .decorations(cfg!(target_os = "macos"))
     .initialization_script(script)
     .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
-    .on_navigation(move |url| {
-        let trusted = navigation::embedded(url);
-        if !trusted {
-            open_external(&nav_app, url)
-        }
-        trusted
-    })
+    .on_navigation(navigation::embedded)
     .on_new_window(move |url, _| {
         open_external(&popup_app, &url);
         tauri::webview::NewWindowResponse::Deny
@@ -762,6 +773,7 @@ fn main() {
             check_update,
             install_update,
             open_releases,
+            open_link,
             window_action
         ])
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -827,6 +839,7 @@ fn main() {
                 config_changed: Arc::new(tokio::sync::Notify::new()),
                 services: tokio::sync::Mutex::new(None),
                 smoke,
+                external_opens: std::sync::atomic::AtomicUsize::new(0),
             });
             app.state::<AppState>().recovery(false);
             let notifications = app.handle().clone();

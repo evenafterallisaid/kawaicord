@@ -2,6 +2,7 @@ import './media';
 import { installSpotifyDiagnostics } from './spotify';
 import { installTitlebar } from './titlebar';
 import { installNotifications } from './notifications';
+import { installExternalLinks } from './links';
 import { installCloudBridge } from './cloud';
 import { nameplateCompatibility } from './nameplates';
 import { instanceHelpers } from './instances';
@@ -24,6 +25,7 @@ const invoke = window.__TAURI_INTERNALS__.invoke.bind(window.__TAURI_INTERNALS__
 const boot=window.__KAWAICORD_BOOT__;
 const refreshNotificationPermission = installNotifications(invoke, () => boot.config.notifications);
 installCloudBridge(invoke);
+installExternalLinks(invoke);
 installSpotifyDiagnostics();
 const setStaticNameplates=nameplateCompatibility();
 window.kawaicord=Object.freeze({

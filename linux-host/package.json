@@ -1,6 +1,6 @@
 {
   "name": "kawaicord-linux",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "private": true,
   "description": "kawaicord with chromium for reliable linux voice and a shared rust core",
   "author": "Kawaicord contributors",

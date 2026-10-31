@@ -1,5 +1,6 @@
-kawaicord 2.0.0. the coffee finally got a release build.
+kawaicord 2.0.1. the coffee finally got a release build.
 
+- stopped spotify previews from launching browser tabs when opening dms or scrolling. embedded previews stay inside discord; deliberate external links retain their normal behavior.
 - replaced the electron host with rust, tauri, and a small typescript bridge on macos and windows. linux uses chromium with the same rust service because stable webkitgtk cannot run discord voice reliably. the linux package is larger; macos and windows keep their system webviews.
 - fixed macos identifying itself as an unknown webkit client, which made discord reject voice calls as an unsupported browser. the app now reports the installed safari version and allows incoming audio playback.
 - added the microphone and camera entitlements to signed mac builds. without them, macos denied microphone access before it could show a permission prompt.

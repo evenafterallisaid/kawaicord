@@ -23,6 +23,7 @@
     "allow-notify",
     "allow-close-notification",
     "allow-window-action",
+    "allow-open-link",
     "allow-restart-recovery",
     "allow-get-settings",
     "allow-save-config",

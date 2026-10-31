@@ -26,6 +26,7 @@ let quitting = false;
 let runtime: any;
 let safeMode = false;
 let sequence = 0;
+let externalOpens = 0;
 const windows = new Map<number, ClientWindow>();
 const scriptCache = new Map<string, string>();
 const notifications = new Map<string, Notification>();
@@ -41,7 +42,7 @@ function evaluate(record: ClientWindow, code: string) { return record.window.web
 function background(record: ClientWindow, hidden: boolean) { if (!record.recovery && alive(record)) void evaluate(record, `window.__kawaicordSetBackground?.(${hidden})`).catch(() => {}); }
 function chrome(record: ClientWindow) { return { maximized: record.window.isMaximized(), focused: record.window.isFocused() }; }
 function show(record = main) { if (!alive(record)) return; record.window.show(); record.window.restore(); record.window.focus(); background(record, false); }
-async function openExternal(address: string) { if (external(address)) await shell.openExternal(address); }
+async function openExternal(address: string) { if (external(address)) { externalOpens++; if (!smoke) await shell.openExternal(address); } }
 function authenticated(event: IpcMainInvokeEvent) {
   const record = windows.get(event.sender.id);
   if (!record || event.senderFrame !== event.sender.mainFrame || (!trusted(event.senderFrame.url) && !(record.recovery && event.senderFrame.url.split('#')[0] === pathToFileURL(recoveryFile).href))) throw new Error('Untrusted renderer');
@@ -113,7 +114,7 @@ async function createWindow(id?: string, name = 'Kawaicord', persistent = true, 
   if (id && persistent) { savedSessions[id] = true; saveJson(join(profile, 'chromium-sessions.json'), savedSessions); }
   win.webContents.on('before-input-event', (event, input) => { if (input.type === 'keyDown' && input.control && input.key.toLowerCase() === 'q') { event.preventDefault(); void quit(); } });
   win.webContents.setWindowOpenHandler(({ url }) => { void openExternal(url).catch(() => {}); return { action: 'deny' }; });
-  win.webContents.on('will-navigate', (event, url) => { if (!trusted(url)) { event.preventDefault(); void openExternal(url).catch(() => {}); } });
+  win.webContents.on('will-navigate', (event, url) => { if (!trusted(url)) event.preventDefault(); });
   win.webContents.on('will-frame-navigate', event => { if (!embedded(event.url)) event.preventDefault(); });
   win.webContents.on('render-process-gone', async () => {
     record.ready = false; record.crashes++;
@@ -187,6 +188,7 @@ ipcMain.handle('kawaicord:invoke', async (event, command: string, data: Record<s
   if (!commands.has(command) || !data || typeof data !== 'object') throw new Error('Unsupported client action');
   if (record.recovery && !['get_settings', 'save_config', 'show_discord', 'restart_app', 'restart_recovery', 'refresh_mods', 'check_update', 'install_update', 'open_releases'].includes(command)) throw new Error('Unavailable recovery action');
   switch (command) {
+    case 'open_link': if (typeof data.url !== 'string' || !external(data.url)) throw new Error('Unsupported link'); return openExternal(data.url);
     case 'window_action': { const state = chrome(record); switch (data.action) { case 'state': break; case 'minimize': record.window.minimize(); break; case 'maximize': if (state.maximized) record.window.unmaximize(); else record.window.maximize(); break; case 'close': record.window.close(); return state; case 'drag': break; default: throw new Error('Unsupported window action'); } return chrome(record); }
     case 'notification_permission': return Notification.isSupported() ? 'granted' : 'denied';
     case 'notify': {
@@ -249,6 +251,13 @@ async function diagnose(record: ClientWindow, status: any) {
   }
   if (flag('--integration-test')) {
     record.window.show();
+    const beforeExternal=externalOpens;
+    await evaluate(record,`(()=>{for(const url of ['https://open.spotify.com/embed/track/11dFghVXANMlKmJXsNCbNl','https://example.com/']){const frame=document.createElement('iframe');frame.dataset.kawaicordLinkProbe='true';frame.src=url;document.body.append(frame)}return true})()`);
+    await new Promise(resolve=>setTimeout(resolve,6000));
+    if(externalOpens!==beforeExternal) throw new Error('A preview opened an external browser without a click');
+    await evaluate(record,"document.querySelectorAll('[data-kawaicord-link-probe]').forEach(frame=>frame.remove());true");
+    await evaluate(record,"window.__TAURI_INTERNALS__.invoke('open_link',{url:'https://open.spotify.com/track/11dFghVXANMlKmJXsNCbNl'})");
+    if(externalOpens!==beforeExternal+1) throw new Error('An intentional external link did not reach the opener');
     const idA=`smoke-a-${process.pid}`,idB=`smoke-b-${process.pid}`;
     const a=await createWindow(idA,'isolated a',true),b=await createWindow(idB,'isolated b',true); await Promise.all([ready(a),ready(b)]);
     const mark="(()=>{document.cookie='__kawaicord_isolation_cookie=alpha;Path=/;Secure;SameSite=Lax';const frame=document.createElement('iframe');document.body.append(frame);frame.contentWindow.localStorage.setItem('__kawaicord_isolation_probe','alpha');frame.remove();return true})()";
@@ -268,7 +277,7 @@ async function diagnose(record: ClientWindow, status: any) {
     const temporaryA=await createWindow(idA,'temporary a',false),temporaryB=await createWindow(idB,'temporary b',false); await Promise.all([ready(temporaryA),ready(temporaryB)]); await evaluate(temporaryA,mark); if(!await evaluate(temporaryB,clean)) throw new Error('Temporary sessions share storage');
     await closeInstances(); const fresh=await createWindow(idA,'fresh temporary',false); await ready(fresh); if(!await evaluate(fresh,clean)) throw new Error('Temporary session was restored'); await closeInstances();
     if(process.env.KAWAICORD_FRAME_CAPTURE) writeFileSync(process.env.KAWAICORD_FRAME_CAPTURE,(await record.window.capturePage({x:0,y:0,width:record.window.getContentBounds().width,height:64})).toPNG());
-    const report={ok:true,separateSessionStorage:true,clearedSessionStayedCleared:true,temporarySessionsIsolated:true,temporarySessionNotRestored:true,discordSettingsRendered:true,buttonLabelsFit:true,oauthConfigurationLoaded:true,nativeInstanceHelper:true,customWindowControls:true};saveJson(join(profile,'integration.json'),report);console.log(JSON.stringify(report));
+    const report={ok:true,previewDidNotOpenBrowser:true,intentionalExternalLink:true,separateSessionStorage:true,clearedSessionStayedCleared:true,temporarySessionsIsolated:true,temporarySessionNotRestored:true,discordSettingsRendered:true,buttonLabelsFit:true,oauthConfigurationLoaded:true,nativeInstanceHelper:true,customWindowControls:true};saveJson(join(profile,'integration.json'),report);console.log(JSON.stringify(report));
   }
   await quit(0);
 }
