@@ -71,5 +71,8 @@
       ]
     }
   },
-  "homepage": "https://github.com/evenafterallisaid/kawaicord"
+  "homepage": "https://github.com/evenafterallisaid/kawaicord",
+  "overrides": {
+    "minimatch@>=9 <11": "11.0.3"
+  }
 }

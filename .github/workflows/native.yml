@@ -116,7 +116,11 @@ jobs:
       - run: npm ci --prefix linux-host
       - run: npm run build --prefix linux-host
       - run: npm audit --omit=dev
-      - run: npm audit --prefix linux-host
+      - name: audit shipped linux dependencies
+        run: npm audit --prefix linux-host --omit=dev
+      # packaging dependencies are excluded from the shipped app; retain their high-severity gate.
+      - name: audit packaging tools
+        run: npm audit --prefix linux-host --audit-level=high
       - run: node --test tests/linux-host.test.mjs
       - run: npm run package --prefix linux-host
       - name: live discord startup with all three mods
