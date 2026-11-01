@@ -62,6 +62,9 @@ impl Snapshot {
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "lowercase", deny_unknown_fields)]
 pub enum Request {
+    Native {
+        command: crate::spotify_native::Request,
+    },
     Status,
     Publish {
         snapshot: Snapshot,
@@ -72,6 +75,13 @@ pub enum Request {
     },
     Stop,
     Install,
+}
+#[cfg(feature = "native")]
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum Reply {
+    Native(crate::spotify_native::PlayerState),
+    Companion(Status),
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -168,6 +178,9 @@ pub async fn disable() {
     *b.blocked.lock().unwrap() = None;
 }
 pub async fn request(profile: &Path, enabled: bool, request: Request) -> Result<Status, String> {
+    if matches!(request, Request::Native { .. }) {
+        return Err("Native playback must use its separately enabled control path.".into());
+    }
     if matches!(request, Request::Install) {
         let profile = profile.to_owned();
         let message = tokio::task::spawn_blocking(move || install(&profile))
@@ -252,7 +265,7 @@ pub async fn request(profile: &Path, enabled: bool, request: Request) -> Result<
             });
         }
         Request::Status => {}
-        Request::Install => unreachable!(),
+        Request::Install | Request::Native { .. } => unreachable!(),
     }
     Ok(status(if b.connected.load(Ordering::Acquire) {
         "Spotify companion connected."

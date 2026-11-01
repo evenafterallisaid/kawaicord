@@ -7,6 +7,7 @@ mod games;
 mod release_feed;
 mod rpc;
 mod spotify_bridge;
+mod spotify_native;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -93,6 +94,7 @@ impl Core {
                 let mut config = self.config.lock().unwrap().clone();
                 if args["id"].is_string() {
                     config.spotify_local_playback = false;
+                    config.spotify_native_playback = false;
                 }
                 if let Some(value) = args["performanceMode"].as_bool() {
                     config.performance_mode = value;
@@ -109,8 +111,9 @@ impl Core {
                 json!({"config":self.config.lock().unwrap().clone(),"runtime":self.runtime.lock().unwrap().clone(),"updater":self.updater.status()}),
             ),
             "save_config" => {
-                let config: config::Config = serde_json::from_value(args["config"].clone())
+                let mut config: config::Config = serde_json::from_value(args["config"].clone())
                     .map_err(|error| error.to_string())?;
+                config.normalize();
                 config::save_json(&self.profile.join("config.json"), &config)?;
                 *self.config.lock().unwrap() = config.clone();
                 self.changed.notify_one();
@@ -123,6 +126,12 @@ impl Core {
             "spotify_bridge" => {
                 let request: spotify_bridge::Request =
                     serde_json::from_value(args["request"].clone()).map_err(|e| e.to_string())?;
+                if let spotify_bridge::Request::Native { command } = request {
+                    let enabled =
+                        !self.smoke && self.config.lock().unwrap().spotify_native_playback;
+                    return serde_json::to_value(spotify_native::request(enabled, command).await?)
+                        .map_err(|e| e.to_string());
+                }
                 let enabled = !self.smoke && self.config.lock().unwrap().spotify_local_playback;
                 let status = spotify_bridge::request(&self.profile, enabled, request).await?;
                 serde_json::to_value(status).map_err(|e| e.to_string())

@@ -209,7 +209,7 @@ ipcMain.handle('kawaicord:invoke', async (event, command: string, data: Record<s
     case 'save_config': {
       const oldStartup = config.startAtLogin; config = await core.request(command, data); scriptCache.clear();
       setTray(); if (oldStartup !== config.startAtLogin) loginStartup();
-      for (const window of windows.values()) if (!window.recovery) void evaluate(window, `window.__kawaicordUpdateConfig?.(${JSON.stringify(window.id ? { ...config, spotifyLocalPlayback: false } : config)})`).catch(() => {});
+      for (const window of windows.values()) if (!window.recovery) void evaluate(window, `window.__kawaicordUpdateConfig?.(${JSON.stringify(window.id ? { ...config, spotifyLocalPlayback: false, spotifyNativePlayback: false } : config)})`).catch(() => {});
       return config;
     }
     case 'spotify_bridge': if (record.id) throw new Error('Local Spotify playback belongs to the main window'); return core.request(command, data);

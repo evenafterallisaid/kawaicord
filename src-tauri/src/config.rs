@@ -39,6 +39,14 @@ pub struct Config {
     pub preview_updates: bool,
     pub notifications: bool,
     pub spotify_local_playback: bool,
+    pub spotify_native_playback: bool,
+}
+impl Config {
+    pub fn normalize(&mut self) {
+        if self.spotify_native_playback {
+            self.spotify_local_playback = false;
+        }
+    }
 }
 impl Default for Config {
     fn default() -> Self {
@@ -56,6 +64,7 @@ impl Default for Config {
             preview_updates: false,
             notifications: true,
             spotify_local_playback: false,
+            spotify_native_playback: false,
         }
     }
 }
@@ -160,7 +169,7 @@ mod tests {
 }
 
 pub fn load_config(path: &Path) -> Result<Config, String> {
-    let config = if path.exists() {
+    let mut config = if path.exists() {
         let bytes = fs::read(path).map_err(|error| error.to_string())?;
         match serde_json::from_slice::<Config>(&bytes) {
             Ok(config) => config,
@@ -173,6 +182,7 @@ pub fn load_config(path: &Path) -> Result<Config, String> {
     } else {
         Config::default()
     };
+    config.normalize();
     save_json(path, &config)?;
     Ok(config)
 }

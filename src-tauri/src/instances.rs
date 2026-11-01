@@ -145,6 +145,7 @@ pub async fn open_instance(
     config.performance_mode = performance_mode;
     config.rich_presence = false;
     config.spotify_local_playback = false;
+    config.spotify_native_playback = false;
     let script =
         super::bundles::initialization(&profile(&app, &id), config.active_mod, false, &config)
             .map_err(|e| e.to_string())?;

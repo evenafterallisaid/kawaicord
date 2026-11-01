@@ -1,15 +1,27 @@
+import { NativeSpotifyPlayer } from './spotify-native';
+import type { ListeningTarget } from './spotify-companion-controller';
 import type { Invoke } from './discord-settings';
 export interface SpotifyBridgeStatus { connected: boolean; outcome: string; message: string }
 let invoke: Invoke | undefined, enabled = false, installed = false, session = '', generation = 0;
+let native: NativeSpotifyPlayer | undefined, nativeMode = false, revision = 0;
 let timer: ReturnType<typeof setTimeout> | undefined, previous = '', wasFollowing = false;
 let deadline = 0, needsRestart = false, presenceSignature = '';
 let lastStatus: SpotifyBridgeStatus | undefined;
 let hostPresenceObserved = false;
 let playbackAttempt = 0, remotePending = false;
 const common = () => (window.Vencord?.Webpack as any)?.Common;
-async function command(request: Record<string, unknown>) {
+type LocalRequest = { action: 'stop' | 'status' } | { action: 'publish'; snapshot: ListeningTarget; restart: boolean; pending: boolean };
+async function command(request: LocalRequest) {
   if (!invoke) return;
-  try { return lastStatus = await invoke<SpotifyBridgeStatus>('spotify_bridge', { request }); }
+  try {
+    if (nativeMode && native) {
+      if (request.action === 'publish') native.publish({ revision: ++revision, snapshot: request.snapshot, restart: request.restart, pending: request.pending });
+      else if (request.action === 'stop') native.stop();
+      else if (request.action === 'status') await native.status();
+      return lastStatus;
+    }
+    return lastStatus = await invoke<SpotifyBridgeStatus>('spotify_bridge', { request });
+  }
   catch (error) { lastStatus = { connected: false, outcome: 'error', message: String(error) }; }
 }
 function publish(restart = false, pending = remotePending) {
@@ -46,17 +58,21 @@ export function spotifyPlaybackCompleted(attempt = playbackAttempt) {
 }
 export function spotifyLocalStatus() { return lastStatus; }
 export async function refreshSpotifyLocal() { if (enabled) await command({ action: 'status' }); }
-export function configureSpotifyLocal(value: boolean) {
+export function configureSpotifyLocal(value: boolean, useNative = false) {
+  if (nativeMode !== useNative) { native?.stop(); previous = ''; }
+  nativeMode = useNative;
+  value ||= useNative;
   const changed = value !== enabled;
   enabled = value; previous = '';
   if (!value) cancelScheduled();
-  if (invoke && (value || changed)) void command({ action: value ? 'status' : 'stop' });
+  if (invoke && (!nativeMode || !value) && (value || changed)) void command({ action: value ? 'status' : 'stop' });
 }
-export function installSpotifyLocal(bridge: Invoke, value: boolean) {
+export function installSpotifyLocal(bridge: Invoke, value: boolean, useNative = false) {
   invoke = bridge;
+  native ??= new NativeSpotifyPlayer(bridge, status => { if (nativeMode) lastStatus = status; });
   // a freshly loaded discord page must not inherit ownership from its previous session.
   if (value) void command({ action: 'stop' });
-  configureSpotifyLocal(value);
+  configureSpotifyLocal(value, useNative);
   const stores = common();
   if (installed || typeof stores?.SpotifyStore?.addChangeListener !== 'function' || typeof stores?.FluxDispatcher?.subscribe !== 'function') return;
   installed = true;

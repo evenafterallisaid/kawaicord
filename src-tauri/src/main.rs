@@ -11,6 +11,7 @@ mod navigation;
 mod release_feed;
 mod rpc;
 mod spotify_bridge;
+mod spotify_native;
 mod updater;
 use config::{Config, Recovery, WindowState};
 use serde::{Deserialize, Serialize};
@@ -314,27 +315,41 @@ async fn spotify_bridge(
     window: WebviewWindow,
     state: State<'_, AppState>,
     request: spotify_bridge::Request,
-) -> Result<spotify_bridge::Status, String> {
+) -> Result<spotify_bridge::Reply, String> {
     if window.label() != "main" {
         return Err("Local Spotify playback belongs to the main window.".into());
     }
     either(&window)?;
+    if let spotify_bridge::Request::Native { command } = request {
+        let enabled = !state.smoke
+            && state
+                .config
+                .lock()
+                .map_err(|e| e.to_string())?
+                .spotify_native_playback;
+        return spotify_native::request(enabled, command)
+            .await
+            .map(spotify_bridge::Reply::Native);
+    }
     let enabled = !state.smoke
         && state
             .config
             .lock()
             .map_err(|e| e.to_string())?
             .spotify_local_playback;
-    spotify_bridge::request(&state.profile, enabled, request).await
+    spotify_bridge::request(&state.profile, enabled, request)
+        .await
+        .map(spotify_bridge::Reply::Companion)
 }
 #[tauri::command]
 async fn save_config(
     app: AppHandle,
     window: WebviewWindow,
     state: State<'_, AppState>,
-    config: Config,
+    mut config: Config,
 ) -> Result<Config, String> {
     either(&window)?;
+    config.normalize();
     let old = state.config.lock().map_err(|e| e.to_string())?.clone();
     if old.start_at_login != config.start_at_login {
         let manager = app.autolaunch();

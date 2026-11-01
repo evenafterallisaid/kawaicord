@@ -4,4 +4,5 @@
 <key>NSMicrophoneUsageDescription</key><string>Kawaicord uses the microphone for Discord voice calls.</string>
 <key>NSCameraUsageDescription</key><string>Kawaicord uses the camera for Discord video calls.</string>
 <key>NSScreenCaptureUsageDescription</key><string>Kawaicord uses screen recording for Discord screen sharing.</string>
+<key>NSAppleEventsUsageDescription</key><string>Kawaicord controls Spotify playback only when you enable native Listen Along.</string>
 </dict></plist>

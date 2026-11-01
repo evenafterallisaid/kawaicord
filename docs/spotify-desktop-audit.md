@@ -88,3 +88,13 @@ soloist may remove the spicetify modification requirement for users willing to u
 required live comparison: same mac, spotify version, account, and host listening session, first using unmodified official discord and then legcord, with kawaicord's local repair disabled. record actual playback and position, a host track change, and the point where any session ends. neither a successful http response nor an open listen-along panel is sufficient. this comparison remains outstanding; no extra client was installed or launched by the static audit.
 
 this is not a complete decompilation of discord, electron, chromium, every downloadable native module, or discord's remote services. no proprietary client code, reconstructed source, account credentials, or downloaded executable is committed to this repository.
+
+## implemented local native alternative
+
+continued inspection of the installed spotify macos app found its `Spotify.sdef` dictionary. it declares `play track` (`spfy/PCtx`), play and pause, writable `player position`, player state, and the current track's spotify url. kawaicord now has an opt-in adapter that sends those typed apple events directly through foundation. it does not run a shell or an applescript string, patch spotify, or change discord's desktop flags. the app carries an automation usage description and apple-events entitlement.
+
+linux has an opt-in mpris adapter using `OpenUri`, `SetPosition`, `Play`, and `Pause` on the spotify session-bus service. positions are converted between milliseconds and mpris microseconds. native reads bypass proxy caches so a successful command is followed by current player state. seek/pause/resume are guarded by the expected track uri, and `SetPosition` also uses the current mpris track identifier. a private-bus integration test covers real dbus calls and stale-target rejection in linux ci.
+
+both adapters reuse the existing listening controller for host changes, pause/resume, late remote responses, and manual overrides. a one-second state check runs only during an explicit listening session; stop, page exit, errors, and manual overrides cancel it. the modes are mutually exclusive and off by default. windows keeps the existing companion; no matching windows local interface was established by this pass.
+
+this is our own use of spotify's native interfaces. it is not a newly discovered official-discord playback routine. legcord's reviewed source still supplies no spotify-specific fix to port. native macos/linux playback remains experimental until authenticated validation; a passing mocked controller or isolated mpris service does not establish audio from the real spotify app.
