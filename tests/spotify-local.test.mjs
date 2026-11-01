@@ -78,3 +78,9 @@ test('remote playback can blank the player or change to its expected track witho
   const finished=f.frame(3,c);finished.restart=true;f.controller.update(finished);await flush();assert.deepEqual(f.reports.at(-1),[3,'playing']);
   const next=f.frame(4,b);next.pending=true;f.controller.update(next);f.state.uri=a;f.controller.observe('song');assert.deepEqual(f.reports.at(-1),[4,'manual-stop']);
 });
+
+test('a new track must actually be playing before the initial seek is sent',async()=>{
+  const f=fixture();f.player.play=async uri=>{f.calls.push(['play',uri]);f.state.uri=uri;f.state.playing=false;};
+  f.controller.update(f.frame(1,b));await flush();assert.deepEqual(f.calls,[['play',b]]);
+  f.state.playing=true;f.controller.observe('progress');await flush();assert.deepEqual(f.calls.at(-1),['seek',20000]);assert.deepEqual(f.reports.at(-1),[1,'playing']);
+});

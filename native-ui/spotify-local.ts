@@ -7,7 +7,6 @@ let native: NativeSpotifyPlayer | undefined, nativeMode = false, revision = 0;
 let timer: ReturnType<typeof setTimeout> | undefined, previous = '', wasFollowing = false;
 let deadline = 0, needsRestart = false, presenceSignature = '';
 let lastStatus: SpotifyBridgeStatus | undefined;
-let hostPresenceObserved = false;
 let playbackAttempt = 0, remotePending = false;
 const common = () => (window.Vencord?.Webpack as any)?.Common;
 type LocalRequest = { action: 'stop' | 'status' } | { action: 'publish'; snapshot: ListeningTarget; restart: boolean; pending: boolean };
@@ -32,10 +31,10 @@ function publish(restart = false, pending = remotePending) {
   const socket = store.getActiveSocketAndDevice?.()?.socket;
   if (socket?.isPremium !== true || !/^[a-zA-Z0-9]{22}$/.test(sync.trackId) || !Number.isSafeInteger(startMs)) return;
   const activity = common()?.PresenceStore?.getActivities?.(sync.userId)?.find((value: any) => value.sync_id === sync.trackId);
-  if (activity) hostPresenceObserved = true;
-  if (activity?.metadata?.type && activity.metadata.type !== 'track') return;
+  // a missing presence is not an explicit pause. Discord itself retains the session for five minutes.
+  if (!activity || activity.metadata?.type && activity.metadata.type !== 'track') return;
   const duration = activity?.timestamps?.end - activity?.timestamps?.start;
-  const snapshot = { session, uri: `spotify:track:${sync.trackId}`, startMs, durationMs: Number.isSafeInteger(duration) && duration > 0 && duration <= 3_600_000 ? duration : 0, paused: hostPresenceObserved && !activity };
+  const snapshot = { session, uri: `spotify:track:${sync.trackId}`, startMs, durationMs: Number.isSafeInteger(duration) && duration > 0 && duration <= 3_600_000 ? duration : 0, paused: false };
   const serialized = JSON.stringify({ snapshot, pending });
   if (!restart && serialized === previous) return;
   previous = serialized; void command({ action: 'publish', snapshot, restart, pending });
@@ -77,7 +76,7 @@ export function installSpotifyLocal(bridge: Invoke, value: boolean, useNative = 
   if (installed || typeof stores?.SpotifyStore?.addChangeListener !== 'function' || typeof stores?.FluxDispatcher?.subscribe !== 'function') return;
   installed = true;
   window.addEventListener?.('pagehide', () => configureSpotifyLocal(false), { once: true });
-  const started = () => { cancelScheduled(); session = `${Date.now()}-${++generation}`; previous = ''; hostPresenceObserved = false; presenceSignature = ''; if (enabled) schedule(1000, true); };
+  const started = () => { cancelScheduled(); session = `${Date.now()}-${++generation}`; previous = ''; presenceSignature = ''; if (enabled) schedule(1000, true); };
   stores.FluxDispatcher.subscribe('ACTIVITY_SYNC', started);
   stores.PresenceStore?.addChangeListener?.(() => {
     const sync = stores.SpotifyStore.getSyncingWith?.();

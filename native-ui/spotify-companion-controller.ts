@@ -56,7 +56,7 @@ export class LocalListeningController {
             continue;
           }
           this.ownedSession = target.session;
-          if (frame.restart || this.player.uri() !== target.uri) { await this.player.play(target.uri); await this.waitForState(frame); }
+          if (frame.restart || this.player.uri() !== target.uri) { await this.player.play(target.uri); await this.waitForState(frame, true); }
           if (this.frame !== frame) continue;
           if (this.player.uri() !== target.uri) { this.release(frame); continue; }
           await this.player.seek(this.position(target));
@@ -66,7 +66,7 @@ export class LocalListeningController {
           await this.waitForState(frame, true);
           if (this.frame !== frame) continue;
           this.lastSeek = this.now();
-          this.previousPosition = this.player.position(); this.previousDuration = this.player.duration();
+          this.previousPosition = this.player.position(); this.previousDuration = this.player.duration() || target.durationMs;
           this.report(frame.revision, 'playing');
         } catch {
           if (this.frame === frame) { this.blocked = target.session; this.report(frame.revision, 'error'); }
@@ -85,12 +85,12 @@ export class LocalListeningController {
     if ((kind === 'song' && changed) || (kind === 'pause' && paused)) {
       // a natural track boundary gets a short handover window for the next presence update.
       if (this.previousDuration > 0 && this.previousPosition >= this.previousDuration - 1500) {
-        setTimeout(() => { if (this.frame === frame && (this.player.uri() !== target.uri || !this.player.playing())) this.release(frame); }, 2500);
+        setTimeout(() => { if (this.frame === frame && (this.player.uri() !== target.uri || !this.player.playing())) this.release(frame); }, 5000);
       } else this.release(frame);
       return;
     }
     if (kind !== 'progress' || frame.pending) return;
-    this.previousPosition = this.player.position(); this.previousDuration = this.player.duration();
+    this.previousPosition = this.player.position(); this.previousDuration = this.player.duration() || target.durationMs;
     if (changed || paused || this.now() - this.lastSeek < 10_000) return;
     if (Math.abs(this.player.position() - this.position(target)) > 2500) {
       this.lastSeek = this.now();

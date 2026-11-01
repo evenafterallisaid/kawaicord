@@ -12,7 +12,7 @@ function fixture(enabled){
   const module={exports:{}};
   vm.runInNewContext(bundle.outputFiles[0].text,{module,window,queueMicrotask,setTimeout:fn=>{timers.set(++timerId,fn);return timerId;},clearTimeout:id=>timers.delete(id)});
   module.exports.installSpotifyLocal(async(command,args)=>{calls.push([command,args]);return{connected:true,outcome:'idle',message:'connected'};},enabled);
-  return{api:module.exports,calls,join(){sync={userId:'private-friend',trackId:'0123456789abcdefghijkl',startTime:10000};events.ACTIVITY_SYNC();changes();},stop(){sync=null;changes();},pauseHost(){activities=[];presenceChanged();},flush(){const pending=[...timers.values()];timers.clear();pending.forEach(fn=>fn());},timers};
+  return{api:module.exports,calls,join(){sync={userId:'private-friend',trackId:'0123456789abcdefghijkl',startTime:10000};events.ACTIVITY_SYNC();changes();},stop(){sync=null;changes();},pauseHost(){activities=[];presenceChanged();},restoreHost(){sync.trackId='1123456789abcdefghijkl';sync.startTime=12000;activities=[{sync_id:sync.trackId,metadata:{type:'track'},timestamps:{start:12000,end:212000}}];presenceChanged();},flush(){const pending=[...timers.values()];timers.clear();pending.forEach(fn=>fn());},timers};
 }
 test('the feed stays idle by default and sends only the selected track timing when enabled',()=>{
   const off=fixture(false);off.join();off.api.spotifyPlaybackCompleted();off.flush();assert.equal(off.calls.length,0);
@@ -20,7 +20,7 @@ test('the feed stays idle by default and sends only the selected track timing wh
   const request=on.calls.at(-1);assert.equal(request[0],'spotify_bridge');assert.equal(request[1].request.action,'publish');
   const snapshot=request[1].request.snapshot;assert.equal(snapshot.uri,'spotify:track:0123456789abcdefghijkl');assert.equal(snapshot.startMs,10000);assert.equal(snapshot.durationMs,200000);
   assert.doesNotMatch(JSON.stringify(on.calls),/secret|private-friend|private-device/);
-  on.pauseHost();on.flush();assert.equal(on.calls.at(-1)[1].request.snapshot.paused,true);
+  const count=on.calls.length;on.pauseHost();on.flush();assert.equal(on.calls.length,count);assert.equal(on.calls.at(-1)[1].request.snapshot.paused,false);
   on.stop();assert.equal(on.calls.at(-1)[1].request.action,'stop');assert.equal(on.timers.size,0);
 });
 test('another remote response reapplies the current target after it blanks the local player',()=>{
@@ -38,4 +38,10 @@ test('in-flight playback marks the transition and an older response cannot finis
   f.api.spotifyPlaybackBeginning(2);await Promise.resolve();f.api.spotifyPlaybackCompleted(1);f.flush();
   assert.equal(f.calls.at(-1)[1].request.pending,true);
   f.api.spotifyPlaybackCompleted(2);f.flush();assert.equal(f.calls.at(-1)[1].request.pending,false);
+});
+
+test('temporary absence of host presence does not pause playback or destroy the listening session',()=>{
+  const f=fixture(true);f.join();f.api.spotifyPlaybackCompleted();f.flush();const count=f.calls.length;
+  f.pauseHost();f.flush();assert.equal(f.calls.length,count);
+  f.restoreHost();f.flush();assert.equal(f.calls.at(-1)[1].request.snapshot.uri,'spotify:track:1123456789abcdefghijkl');assert.equal(f.calls.at(-1)[1].request.snapshot.paused,false);f.stop();
 });

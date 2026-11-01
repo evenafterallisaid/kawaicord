@@ -98,3 +98,9 @@ linux has an opt-in mpris adapter using `OpenUri`, `SetPosition`, `Play`, and `P
 both adapters reuse the existing listening controller for host changes, pause/resume, late remote responses, and manual overrides. a one-second state check runs only during an explicit listening session; stop, page exit, errors, and manual overrides cancel it. the modes are mutually exclusive and off by default. windows keeps the existing companion; no matching windows local interface was established by this pass.
 
 this is our own use of spotify's native interfaces. it is not a newly discovered official-discord playback routine. legcord's reviewed source still supplies no spotify-specific fix to port. native macos/linux playback remains experimental until authenticated validation; a passing mocked controller or isolated mpris service does not establish audio from the real spotify app.
+
+### follow-up from real macos testing
+
+the tester confirmed that native automation starts playback, then reported incorrect timing and unreliable transitions after spotify presence disappeared. this establishes command delivery, not correct synchronization. inspection found three producing errors: the feed inferred a pause from absent presence, native duration was always zero, and a loaded uri was accepted before the player actually started. the feed now preserves discord's existing presence grace period, duration comes from the host activity, and initial seek waits for playing state. ignored native seeks are retried at most three times and checked against reported position; cancellation releases their timers. natural handovers use the same five-second grace as the inspected discord playback-state handler.
+
+regressions cover ignored seeks, seek failure, loading state, missing and returning host presence, natural track handover, and leaving during a pending native seek. this follow-up still needs authenticated timing and multi-track validation on the tester's app.
