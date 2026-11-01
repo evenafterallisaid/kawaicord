@@ -84,3 +84,9 @@ test('a new track must actually be playing before the initial seek is sent',asyn
   f.controller.update(f.frame(1,b));await flush();assert.deepEqual(f.calls,[['play',b]]);
   f.state.playing=true;f.controller.observe('progress');await flush();assert.deepEqual(f.calls.at(-1),['seek',20000]);assert.deepEqual(f.reports.at(-1),[1,'playing']);
 });
+
+test('an ended zero-position player keeps the session for a later host presence',async()=>{
+  const f=fixture();f.controller.update(f.frame(1,b));await flush();
+  f.state.position=199500;f.controller.observe('progress');f.state.position=0;f.state.playing=false;f.controller.observe('pause');
+  assert.deepEqual(f.reports.at(-1),[1,'playing']);f.advance(20000);f.controller.update(f.frame(2,c,115000));await flush();assert.deepEqual(f.reports.at(-1),[2,'playing']);
+});

@@ -85,7 +85,9 @@ export class LocalListeningController {
     if ((kind === 'song' && changed) || (kind === 'pause' && paused)) {
       // a natural track boundary gets a short handover window for the next presence update.
       if (this.previousDuration > 0 && this.previousPosition >= this.previousDuration - 1500) {
-        setTimeout(() => { if (this.frame === frame && (this.player.uri() !== target.uri || !this.player.playing())) this.release(frame); }, 5000);
+        // Discord also keeps a zero-position idle player while host presence is absent.
+        const idleAtEnd = () => !this.player.playing() && this.player.position() <= 250 && (!this.player.uri() || this.player.uri() === target.uri);
+        if (!idleAtEnd()) setTimeout(() => { if (this.frame === frame && !idleAtEnd() && (this.player.uri() !== target.uri || !this.player.playing())) this.release(frame); }, 5000);
       } else this.release(frame);
       return;
     }
