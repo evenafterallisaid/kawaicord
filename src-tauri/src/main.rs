@@ -54,6 +54,7 @@ struct AppState {
     window_state: Mutex<WindowState>,
     config: Arc<Mutex<Config>>,
     runtime: Mutex<RuntimeStatus>,
+    discord_ready: tokio::sync::Notify,
     quitting: AtomicBool,
     refreshing: AtomicBool,
     #[cfg(target_os = "macos")]
@@ -237,9 +238,38 @@ fn settings_fallback(app: &AppHandle) -> Result<(), String> {
         .inner_size(720.0, 850.0)
         .min_inner_size(570.0, 560.0)
         .decorations(true)
+        .background_color(tauri::webview::Color(17, 18, 20, 255))
         .on_navigation(|u| u.scheme() == "tauri" || u.host_str() == Some("tauri.localhost"))
         .build()
         .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+async fn watch_discord_startup(app: AppHandle, timeout: std::time::Duration) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    if tokio::time::timeout(timeout, state.discord_ready.notified())
+        .await
+        .is_ok()
+        || state.quitting.load(Ordering::Relaxed)
+    {
+        return Ok(());
+    }
+    {
+        let mut runtime = state.runtime.lock().map_err(|error| error.to_string())?;
+        if runtime.ready {
+            return Ok(());
+        }
+        runtime.error.get_or_insert_with(|| {
+            "Discord did not finish loading. Restart in recovery mode to try without your selected client mod.".into()
+        });
+        config::save_json(&state.profile.join("runtime.json"), &*runtime)?;
+    }
+    state.log("Discord startup timed out; offering local recovery");
+    if app.get_webview_window("main").is_some_and(|window| {
+        window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(true)
+    }) {
+        settings_fallback(&app)?;
+    }
     Ok(())
 }
 #[tauri::command]
@@ -268,11 +298,14 @@ async fn restart_app(app: AppHandle, window: WebviewWindow) -> Result<(), String
 #[tauri::command]
 async fn restart_recovery(app: AppHandle, window: WebviewWindow) -> Result<(), String> {
     either(&window)?;
+    restart_in_recovery(&app)
+}
+fn restart_in_recovery(app: &AppHandle) -> Result<(), String> {
     config::save_json(
         &app.state::<AppState>().profile.join("safe-mode.json"),
         &true,
     )?;
-    clean_exit(&app);
+    clean_exit(app);
     app.restart()
 }
 #[tauri::command]
@@ -447,6 +480,9 @@ fn report_runtime(
     ));
     config::save_json(&state.profile.join("runtime.json"), &status)?;
     *state.runtime.lock().map_err(|e| e.to_string())? = status.clone();
+    if status.ready {
+        state.discord_ready.notify_one();
+    }
     if state.smoke {
         if std::env::args().any(|a| a == "--media-test") && status.ready {
             tauri::async_runtime::spawn(diagnostics::run_media(app.clone(), window.clone()));
@@ -637,11 +673,12 @@ fn build_discord(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let saved = state.window_state.lock().unwrap().clone();
     let (width, height) = saved.size();
     let popup_app = app.clone();
+    let blank_probe = state.smoke && std::env::args().any(|arg| arg == "--startup-recovery-test");
     let mut builder = tauri::WebviewWindowBuilder::new(
         app,
         "main",
         WebviewUrl::External(
-            if cfg!(target_os = "macos") {
+            if cfg!(target_os = "macos") || blank_probe {
                 "about:blank"
             } else {
                 "https://discord.com/app"
@@ -653,6 +690,7 @@ fn build_discord(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     .inner_size(width, height)
     .min_inner_size(800.0, 600.0)
     .decorations(cfg!(target_os = "macos"))
+    .background_color(tauri::webview::Color(17, 18, 20, 255))
     .initialization_script(script)
     .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled)
     .on_navigation(navigation::embedded)
@@ -679,7 +717,9 @@ fn build_discord(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     }
     let window = builder.build()?;
     #[cfg(target_os = "macos")]
-    navigate_discord(&window, "https://discord.com/app".parse()?)?;
+    if !blank_probe {
+        navigate_discord(&window, "https://discord.com/app".parse()?)?;
+    }
     if saved.maximized {
         let _ = window.maximize();
     }
@@ -766,6 +806,7 @@ fn desktop(app: &AppHandle) -> tauri::Result<()> {
         .text("show", "Open Kawaicord")
         .text("settings", "Settings…")
         .text("restart", "Restart Kawaicord")
+        .text("restart-recovery", "Restart in recovery mode")
         .separator()
         .text("quit", "Quit Kawaicord")
         .build()?;
@@ -846,6 +887,12 @@ fn main() {
                 clean_exit(app);
                 app.restart();
             }
+            "restart-recovery" => {
+                if let Err(error) = restart_in_recovery(app) {
+                    app.state::<AppState>()
+                        .log(&format!("Could not restart in recovery mode: {error}"));
+                }
+            }
             "quit" => {
                 clean_exit(app);
                 app.exit(0);
@@ -887,6 +934,7 @@ fn main() {
                 window_state: Mutex::new(window_state),
                 config: Arc::new(Mutex::new(config)),
                 runtime: Mutex::new(runtime),
+                discord_ready: tokio::sync::Notify::new(),
                 quitting: AtomicBool::new(false),
                 refreshing: AtomicBool::new(false),
                 #[cfg(target_os = "macos")]
@@ -926,6 +974,23 @@ fn main() {
             })?;
             build_discord(app.handle())?;
             desktop(app.handle())?;
+            if smoke && std::env::args().any(|arg| arg == "--startup-recovery-test") {
+                tauri::async_runtime::spawn(diagnostics::run_startup_recovery(
+                    app.handle().clone(),
+                ));
+            } else if !smoke {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) =
+                        watch_discord_startup(handle.clone(), std::time::Duration::from_secs(65))
+                            .await
+                    {
+                        handle
+                            .state::<AppState>()
+                            .log(&format!("Could not show startup recovery: {error}"));
+                    }
+                });
+            }
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 configure_rpc(&handle).await;

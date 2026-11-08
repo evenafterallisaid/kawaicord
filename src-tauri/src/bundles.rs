@@ -11,10 +11,14 @@ const VENCORD: &str = include_str!("../../vencord/vencord.js");
 const VENCORD_CSS: &str = include_str!("../../vencord/vencord.css");
 const EQUICORD: &str = include_str!("../../equicord/equicord.js");
 const EQUICORD_CSS: &str = include_str!("../../equicord/equicord.css");
+// bump this when a bundled compatibility fix must take precedence over old downloads.
+const CACHE_REVISION: u8 = 1;
 
 #[derive(Serialize, Deserialize, Default)]
 struct CacheManifest {
     updated_at: u64,
+    #[serde(default)]
+    revision: u8,
     #[serde(default)]
     generation: String,
 }
@@ -85,7 +89,8 @@ fn mod_bundle(profile: &Path, mod_: ClientMod) -> (Cow<'static, str>, Cow<'stati
     let dir = profile.join("bundles").join(mod_.id());
     // a cache pair is committed together. incomplete downloads never mask the installer fallback.
     let manifest: CacheManifest = config::read_json(&dir.join("manifest.json"));
-    if !manifest.generation.is_empty()
+    if manifest.revision == CACHE_REVISION
+        && !manifest.generation.is_empty()
         && manifest
             .generation
             .bytes()
@@ -166,7 +171,10 @@ async fn download(client: &reqwest::Client, url: &str, css: bool) -> Result<Stri
 pub async fn refresh(profile: &Path, mod_: ClientMod, force: bool) -> Result<(), String> {
     let dir = profile.join("bundles").join(mod_.id());
     let manifest: CacheManifest = config::read_json(&dir.join("manifest.json"));
-    if !force && config::now().saturating_sub(manifest.updated_at) < 6 * 3600 {
+    if !force
+        && manifest.revision == CACHE_REVISION
+        && config::now().saturating_sub(manifest.updated_at) < 6 * 3600
+    {
         return Ok(());
     }
     let base = match mod_ {
@@ -209,6 +217,7 @@ pub async fn refresh(profile: &Path, mod_: ClientMod, force: bool) -> Result<(),
         &dir.join("manifest.json"),
         &CacheManifest {
             updated_at: config::now(),
+            revision: CACHE_REVISION,
             generation: generation.clone(),
         },
     )?;
@@ -256,6 +265,27 @@ mod tests {
         assert!(!plausible("<!doctype html>", false));
         assert!(!plausible("not found", false));
         assert!(plausible(VENCORD, false));
+    }
+    #[test]
+    fn old_cache_cannot_override_the_fixed_installer_bundle() {
+        let profile =
+            std::env::temp_dir().join(format!("kawaicord-old-cache-{}", std::process::id()));
+        let dir = profile.join("bundles/vencord");
+        let js = format!("/* cached browser js */{}", " ".repeat(1024));
+        let css = format!("/* cached browser css */{}", " ".repeat(256));
+        config::atomic_write(&dir.join("123/browser.js"), js.as_bytes()).unwrap();
+        config::atomic_write(&dir.join("123/browser.css"), css.as_bytes()).unwrap();
+        let mut manifest = CacheManifest {
+            updated_at: config::now(),
+            revision: 0,
+            generation: "123".into(),
+        };
+        config::save_json(&dir.join("manifest.json"), &manifest).unwrap();
+        assert_eq!(mod_bundle(&profile, ClientMod::Vencord).0, VENCORD);
+        manifest.revision = CACHE_REVISION;
+        config::save_json(&dir.join("manifest.json"), &manifest).unwrap();
+        assert_eq!(mod_bundle(&profile, ClientMod::Vencord).0, js);
+        fs::remove_dir_all(profile).unwrap();
     }
     #[test]
     fn illegalcord_logo_is_bundled_instead_of_a_github_html_page() {

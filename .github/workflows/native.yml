@@ -75,6 +75,9 @@ jobs:
           hdiutil verify src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
       - name: live discord startup with all three mods
         run: node scripts/smoke-native.mjs "${{ matrix.binary }}"
+      - name: local recovery when discord never starts
+        if: matrix.platform == 'windows'
+        run: node scripts/smoke-native.mjs "${{ matrix.binary }}" --startup-recovery
       - name: packaged discord voice engine and encrypted media capabilities
         run: node scripts/smoke-native.mjs "${{ matrix.binary }}" --media-preflight
       - name: settings, cloud configuration, and instance isolation

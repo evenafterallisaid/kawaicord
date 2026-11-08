@@ -8,17 +8,18 @@ const binary = resolve(process.argv[2] ?? (process.platform === 'darwin'
   ? 'src-tauri/target/release/bundle/macos/Kawaicord.app/Contents/MacOS/kawaicord'
   : `src-tauri/target/release/kawaicord${process.platform === 'win32' ? '.exe' : ''}`));
 const backgroundTest = process.argv.includes('--background');
+const startupRecoveryTest = process.argv.includes('--startup-recovery');
 const integrationTest = process.argv.includes('--integration');
 const linkTest = process.argv.includes('--links');
 const mediaPreflight = process.argv.includes('--media-preflight');
 const mediaTest = process.argv.includes('--media') || mediaPreflight;
-for (const activeMod of linkTest ? ['equicord'] : integrationTest ? ['illegalcord'] : backgroundTest || mediaTest ? ['vencord'] : ['vencord', 'equicord', 'illegalcord']) {
+for (const activeMod of linkTest ? ['equicord'] : integrationTest ? ['illegalcord'] : backgroundTest || mediaTest || startupRecoveryTest ? ['vencord'] : ['vencord', 'equicord', 'illegalcord']) {
   const profile = await mkdtemp(join(tmpdir(), 'kawaicord-smoke-'));
   let failed = false;
   try {
     await writeFile(join(profile, 'config.json'), JSON.stringify({ activeMod, richPresence: false,
       autoUpdateMods: false, autoUpdateApp: false, notifications: false, startAtLogin: false }));
-    const child = spawn(binary, ['--smoke-test', '--profile', profile, ...(backgroundTest ? ['--background-test'] : []), ...(integrationTest ? ['--integration-test'] : []), ...(linkTest ? ['--link-test'] : []), ...(mediaTest ? ['--media-test'] : []), ...(mediaPreflight ? ['--media-preflight'] : [])], {
+    const child = spawn(binary, ['--smoke-test', '--profile', profile, ...(startupRecoveryTest ? ['--startup-recovery-test'] : []), ...(backgroundTest ? ['--background-test'] : []), ...(integrationTest ? ['--integration-test'] : []), ...(linkTest ? ['--link-test'] : []), ...(mediaTest ? ['--media-test'] : []), ...(mediaPreflight ? ['--media-preflight'] : [])], {
       stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WEBKIT_DISABLE_DMABUF_RENDERER: '1' }
     });
     let output = '';
@@ -28,6 +29,13 @@ for (const activeMod of linkTest ? ['equicord'] : integrationTest ? ['illegalcor
     try {
       code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', resolve); });
     } finally { clearTimeout(timer); }
+    if (startupRecoveryTest) {
+      const report = JSON.parse(await readFile(join(profile, 'startup-recovery.json'), 'utf8').catch(() => '{}'));
+      assert.equal(code, 0, `Startup recovery failed: ${JSON.stringify(report)}\n${output}`);
+      assert.equal(report.ok, true);
+      console.log(JSON.stringify(report));
+      continue;
+    }
     let status;
     try { status = JSON.parse(await readFile(join(profile, 'runtime.json'), 'utf8')); }
     catch { throw new Error(`${activeMod} produced no startup report (exit ${code})\n${output}`); }

@@ -21,8 +21,13 @@ const flags:Array<[keyof Config,string,string]>=[
 async function load(){
   const data=await invoke<{config:Config;runtime:RuntimeStatus;updater:{available:boolean;message:string}}>('get_settings');config=data.config;
   get('version').textContent=`Version ${data.runtime.version}`;
-  get('runtime').textContent=data.runtime.safeMode?'Recovery mode':data.runtime.ready?'Connected':'Starting Discord';
-  get('mod-status').textContent=data.runtime.error??`${data.runtime.modules} Discord modules initialized`;
+  get('runtime').textContent=data.runtime.error?'Startup failed':data.runtime.safeMode?'Recovery mode':data.runtime.ready?'Connected':'Starting Discord';
+  get('startup-help').hidden=!data.runtime.error;
+  get('startup-error').textContent=data.runtime.error??'';
+  const recoveryAction=get<HTMLButtonElement>('startup-recovery');
+  recoveryAction.textContent=data.runtime.safeMode?'Retry Discord':'Restart in recovery mode';
+  recoveryAction.onclick=()=>void action(recoveryAction,()=>invoke(data.runtime.safeMode?'restart_app':'restart_recovery'));
+  get('mod-status').textContent=`${data.runtime.modules} Discord modules initialized`;
   get<HTMLSelectElement>('mod').value=config.activeMod;
   get('update-status').textContent=data.updater.message;
   get('apply-update').hidden=!data.updater.available;

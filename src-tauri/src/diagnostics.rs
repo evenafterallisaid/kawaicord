@@ -21,6 +21,30 @@ async fn evaluate(window: &WebviewWindow, script: &str) -> Result<Value, String>
     }
     Ok(result["value"].clone())
 }
+pub async fn run_startup_recovery(app: AppHandle) {
+    let result = async {
+        super::watch_discord_startup(app.clone(), std::time::Duration::from_secs(1)).await?;
+        let settings = app.get_webview_window("settings").ok_or("Local recovery did not open")?;
+        for _ in 0..40 {
+            let visible = evaluate(&settings, "document.querySelector('#startup-help')?.hidden===false&&document.querySelector('#startup-error')?.textContent.includes('Discord did not finish loading')&&document.querySelector('#startup-recovery')?.textContent==='Restart in recovery mode'").await?;
+            if visible == true {
+                return Ok::<(), String>(());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+        Err("Local recovery did not show the startup error and recovery action".into())
+    }
+    .await;
+    let state = app.state::<super::AppState>();
+    let report = json!({"ok":result.is_ok(),"error":result.as_ref().err()});
+    let saved = super::config::save_json(&state.profile.join("startup-recovery.json"), &report);
+    super::clean_exit(&app);
+    app.exit(if result.is_ok() && saved.is_ok() {
+        0
+    } else {
+        1
+    });
+}
 async fn instance_ready(app: &AppHandle, id: &str) -> Result<WebviewWindow, String> {
     let label = format!("instance-{id}");
     for _ in 0..60 {

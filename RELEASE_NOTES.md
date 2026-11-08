@@ -1,5 +1,7 @@
 kawaicord 2.0.2 candidate. teaching spotify where its own play button lives.
 
+- added a dark startup background and a local recovery screen for a stalled discord load on macos and windows. recovery mode is also available from the tray menu.
+- old cached mods can no longer override the refreshed browser bundles shipped with this build.
 - grouped the in-discord settings so the mod picker, notifications, and background controls stay up front.
 - moved automatic update scheduling into the shared rust code. disabled checks now wait for a settings change, and linux releases startup scripts when their last window closes.
 - listen along on a spotify computer device now sends the host track's album context when available. discord still owns the playback position and track changes, and this path needs no companion or automation. real spotify playback still needs a live check.
