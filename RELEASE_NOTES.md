@@ -1,5 +1,6 @@
 kawaicord 2.0.2 candidate. teaching spotify where its own play button lives.
 
+- listen along on a spotify computer device now sends the host track's album context when available. discord still owns the playback position and track changes, and this path needs no companion or automation. real spotify playback still needs a live check.
 - added optional local spotify playback for the blank-player failure after an accepted remote play request. requires spotify premium and an existing spicetify installation.
 - added companion setup to kawaicord settings. it backs up the spicetify configuration, adds the companion, and applies existing customization without restarting spotify automatically. quit and reopen spotify afterward, then enable listen along on this computer.
 - the companion starts the target track, seeks to the listening position, follows track changes and temporary presence gaps, and releases control after a manual pause or song change. late remote playback responses trigger a fresh local repair instead of leaving spotify blank again.

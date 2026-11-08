@@ -1,5 +1,6 @@
 import './media';
 import { installSpotifyDiagnostics } from './spotify';
+import { installSpotifyAlbumContext } from './spotify-album';
 import { installSpotifyLocal, configureSpotifyLocal } from './spotify-local';
 import { installTitlebar } from './titlebar';
 import { installNotifications } from './notifications';
@@ -78,7 +79,10 @@ window.__kawaicordNativeStart=(css:string)=>{
       (document.getElementById('app-mount')?.textContent?.trim().length ?? 0) > 10;
     if (!ready && !timedOut) return;
     clearInterval(timer);
-    if (ready) installSpotifyLocal(invoke, boot.config.spotifyLocalPlayback, boot.config.spotifyNativePlayback);
+    if (ready) {
+      installSpotifyAlbumContext(() => !boot.safeMode && !boot.config.spotifyLocalPlayback && !boot.config.spotifyNativePlayback);
+      installSpotifyLocal(invoke, boot.config.spotifyLocalPlayback, boot.config.spotifyNativePlayback);
+    }
     const status:RuntimeStatus={activeMod:boot.activeMod,safeMode:boot.safeMode,shelter:!!window.shelter,modules,ready,
       media:typeof navigator.mediaDevices?.getUserMedia==='function',screenSharing:typeof navigator.mediaDevices?.getDisplayMedia==='function',
       error:ready?null:'Discord or the selected mod did not finish initializing. Reload or open Kawaicord settings to try recovery mode.',version:boot.version,platform:boot.platform};
