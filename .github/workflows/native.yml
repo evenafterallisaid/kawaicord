@@ -161,23 +161,26 @@ jobs:
           appimage="$RUNNER_TEMP/electron-builder/appimage-12.0.1"
           icons="$RUNNER_TEMP/electron-builder/icons@1.2.3"
           fpm="$RUNNER_TEMP/fpm"
-          mkdir -p "$appimage" "$icons" "$fpm"
+          electron="$RUNNER_TEMP/electron-dist"
+          mkdir -p "$appimage" "$icons" "$fpm" "$electron"
           gh release download appimage-12.0.1 -R electron-userland/electron-builder-binaries -p appimage-12.0.1.7z -D "$appimage"
           gh release download icons@1.2.3 -R electron-userland/electron-builder-binaries -p icons-bundle.tar.gz -D "$icons"
           gh release download fpm@2.1.4 -R electron-userland/electron-builder-binaries -p fpm-1.17.0-ruby-3.4.3-linux-amd64.7z -D "$fpm"
+          gh release download v45.1.0 -R electron/electron -p electron-v45.1.0-linux-x64.zip -D "$electron"
           sha256sum -c <<EOF
           d12ff7eb8f1d1ec4652ca5237a7fbdca33acc0c758045636feca62dc6ecb8ec4  $appimage/appimage-12.0.1.7z
           4e5bb546c9d3ab0c2bbacc22857467bf415f742a34c2be9dd138779d2fc066f9  $icons/icons-bundle.tar.gz
           44b0ec6025c14ec137f56180e62675c0eae36233cdce53d0953d9c73ced8989f  $fpm/fpm-1.17.0-ruby-3.4.3-linux-amd64.7z
+          9dafab2c57ce209f8f716f8f3e4fddd8ffe0820e2455bfbbfc00b0fc13e03a3b  $electron/electron-v45.1.0-linux-x64.zip
           EOF
           7z x "$fpm/fpm-1.17.0-ruby-3.4.3-linux-amd64.7z" "-o$fpm" >/dev/null
           test -x "$fpm/fpm"
           echo "ELECTRON_BUILDER_CACHE=$RUNNER_TEMP/electron-builder" >> "$GITHUB_ENV"
           echo "ELECTRON_BUILDER_7ZIP_PATH=$(command -v 7z)" >> "$GITHUB_ENV"
           echo "CUSTOM_FPM_PATH=$fpm/fpm" >> "$GITHUB_ENV"
-      - run: npm run package --prefix linux-host -- --publish never
+      - run: npm run package --prefix linux-host -- --publish never -c.electronDist="$RUNNER_TEMP/electron-dist"
         env:
-          DEBUG: electron-builder
+          DEBUG: electron-builder,@electron/get*
       - name: live discord startup with all three mods
         run: xvfb-run -a node scripts/linux-session.mjs linux-host/release/linux-unpacked/kawaicord
       - name: packaged voice engine and real audio loopback
