@@ -1,17 +1,10 @@
-kawaicord 2.0.2 candidate. teaching spotify where its own play button lives.
+kawaicord 2.0.2. the windows installer has had its coffee.
 
-- added a dark startup background and a local recovery screen for a stalled discord load on macos and windows. recovery mode is also available from the tray menu.
-- old cached mods can no longer override the refreshed browser bundles shipped with this build.
-- grouped the in-discord settings so the mod picker, notifications, and background controls stay up front.
-- moved automatic update scheduling into the shared rust code. disabled checks now wait for a settings change, and linux releases startup scripts when their last window closes.
-- listen along on a spotify computer device now sends the host track's album context when available. discord still owns the playback position and track changes, and this path needs no companion or automation. real spotify playback still needs a live check.
-- added optional local spotify playback for the blank-player failure after an accepted remote play request. requires spotify premium and an existing spicetify installation.
-- added companion setup to kawaicord settings. it backs up the spicetify configuration, adds the companion, and applies existing customization without restarting spotify automatically. quit and reopen spotify afterward, then enable listen along on this computer.
-- the companion starts the target track, seeks to the listening position, follows track changes and temporary presence gaps, and releases control after a manual pause or song change. late remote playback responses trigger a fresh local repair instead of leaving spotify blank again.
-- kept the integration off by default and limited it to the main window. it uses paired loopback messages and player events, with no separate background process or idle playback polling loop. spotify account tokens and friend/account identifiers are not sent through the bridge.
-- added an opt-in native spotify path for macos apple events and linux mpris. no spicetify patch or extra spotify login is needed for that mode. macos may ask for automation permission. the companion remains available, including on windows.
-- native playback checks the current track before seeking, resuming, or pausing, releases control after manual changes, and checks player state only while following a listening session.
-- fixed temporary spotify presence loss being mistaken for a pause. new tracks now wait for actual playback before seeking, ignored native seeks get bounded retries with position checks, and track duration is retained for natural handovers.
-- checked startup, synchronization, stale responses, pause/resume, manual overrides, reconnects, bounded drift correction, and paired websocket exchange in automated tests. the macos companion has a user-confirmed playback result; native playback is still experimental pending authenticated validation.
+- refreshed the bundled vencord, equicord, and illegalcord builds for current discord startup. older downloaded copies no longer override the fresh installer bundles.
+- added a dark startup background and local recovery on macos and windows if discord stalls. recovery is also available from the tray menu.
+- tidied kawaicord settings inside discord. the mod picker, notifications, and background controls stay up front.
+- moved automatic update scheduling to shared rust code. disabled checks wait for a settings change. linux also drops the separate cache of startup scripts.
+- adjusted the discord listen along request for spotify desktop when the host track has album metadata. the app still uses discord's sync and playback position. this path needs no companion or automation, and real spotify playback still needs a live check.
+- kept optional spotify playback controls in settings. the spicetify companion is available on all three platforms. macos automation and linux mpris are experimental alternatives. both modes are off by default, and listen along requires spotify premium.
 
-macos and windows use their native webviews; linux keeps the chromium host and shared rust service from 2.0.1. the spotify integration is shared, but real companion playback has not yet been verified on every operating system.
+macos and windows use their system webviews. linux keeps chromium with the shared rust helper.
