@@ -12,6 +12,7 @@ mod release_feed;
 mod rpc;
 mod spotify_bridge;
 mod spotify_native;
+mod update_schedule;
 mod updater;
 use config::{Config, Recovery, WindowState};
 use serde::{Deserialize, Serialize};
@@ -58,6 +59,7 @@ struct AppState {
     #[cfg(target_os = "macos")]
     renderer_crashes: std::sync::atomic::AtomicUsize,
     config_changed: Arc<tokio::sync::Notify>,
+    automatic_updates: tokio::sync::watch::Sender<bool>,
     services: tokio::sync::Mutex<Option<rpc::Service>>,
     smoke: bool,
     external_opens: std::sync::atomic::AtomicUsize,
@@ -375,6 +377,11 @@ async fn save_config(
         ));
     }
     state.config_changed.notify_one();
+    state.automatic_updates.send_if_modified(|enabled| {
+        let changed = *enabled != config.auto_update_app;
+        *enabled = config.auto_update_app;
+        changed
+    });
     if !config.spotify_local_playback {
         spotify_bridge::disable().await;
     }
@@ -873,6 +880,8 @@ fn main() {
                 background_hidden: None,
             };
             let window_state: WindowState = config::read_json(&profile.join("window.json"));
+            let (automatic_updates, update_preferences) =
+                tokio::sync::watch::channel(config.auto_update_app);
             app.manage(AppState {
                 profile,
                 window_state: Mutex::new(window_state),
@@ -883,6 +892,7 @@ fn main() {
                 #[cfg(target_os = "macos")]
                 renderer_crashes: std::sync::atomic::AtomicUsize::new(0),
                 config_changed: Arc::new(tokio::sync::Notify::new()),
+                automatic_updates,
                 services: tokio::sync::Mutex::new(None),
                 smoke,
                 external_opens: std::sync::atomic::AtomicUsize::new(0),
@@ -922,24 +932,16 @@ fn main() {
             });
             if !smoke {
                 let handle = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-                    loop {
-                        if handle
-                            .state::<AppState>()
-                            .config
-                            .lock()
-                            .is_ok_and(|c| c.auto_update_app)
-                        {
-                            if let Err(e) = updater::check(&handle).await {
-                                handle
-                                    .state::<AppState>()
-                                    .log(&format!("Update check failed: {e}"));
-                            }
+                tauri::async_runtime::spawn(update_schedule::run(update_preferences, move || {
+                    let handle = handle.clone();
+                    async move {
+                        if let Err(e) = updater::check(&handle).await {
+                            handle
+                                .state::<AppState>()
+                                .log(&format!("Update check failed: {e}"));
                         }
-                        tokio::time::sleep(std::time::Duration::from_secs(6 * 3600)).await;
                     }
-                });
+                }));
             }
             if smoke {
                 let handle = app.handle().clone();

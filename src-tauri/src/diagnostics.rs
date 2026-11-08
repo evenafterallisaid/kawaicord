@@ -176,7 +176,7 @@ async fn check(app: &AppHandle, main: &WebviewWindow) -> Result<Value, String> {
     }
     evaluate(main,"(()=>{window.__kawaicordUiProbeError=null;shelter.solid.createRoot(()=>{try{const pane=window.__kawaicordSettingsPage();document.body.append(pane)}catch(e){window.__kawaicordUiProbeError=String(e)}});fetch('https://cloud.equicord.org/v1/oauth/settings').then(r=>r.json()).then(v=>window.__kawaicordCloudProbe=!!v.clientId&&!!v.redirectUri).catch(e=>window.__kawaicordCloudProbe=String(e));return true})()").await?;
     tokio::time::sleep(std::time::Duration::from_secs(6)).await;
-    let ui=evaluate(main,"document.querySelector('#kawaicord-settings')?.querySelectorAll('input[type=checkbox]').length>=9").await?;
+    let ui=evaluate(main,"(()=>{const pane=document.querySelector('#kawaicord-settings');const groups=pane?.querySelectorAll('details');if(groups?.length!==4||[...groups].some(group=>group.open)||pane.querySelectorAll('input[type=checkbox]').length<9)return false;for(const group of groups)group.querySelector('summary').click();return [...groups].every(group=>group.open)})()").await?;
     let button_text_fits = evaluate(main,"Array.from(document.querySelectorAll('#kawaicord-settings button')).filter(b=>b.getClientRects().length>0).every(b=>b.scrollWidth<=b.clientWidth+1)").await?;
     let cloud = evaluate(main, "window.__kawaicordCloudProbe===true").await?;
     let helper = evaluate(

@@ -8,6 +8,7 @@ mod release_feed;
 mod rpc;
 mod spotify_bridge;
 mod spotify_native;
+mod update_schedule;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -35,6 +36,7 @@ struct Core {
     profile: PathBuf,
     config: Arc<Mutex<config::Config>>,
     changed: Arc<tokio::sync::Notify>,
+    automatic_updates: tokio::sync::watch::Sender<bool>,
     output: Arc<Output>,
     runtime: Mutex<Value>,
     rpc: tokio::sync::Mutex<Option<rpc::Service>>,
@@ -105,7 +107,7 @@ impl Core {
                     self.safe || args["safeMode"].as_bool().unwrap_or(false),
                     &config,
                 )?;
-                Ok(json!(script))
+                Ok(Value::String(script))
             }
             "get_settings" => Ok(
                 json!({"config":self.config.lock().unwrap().clone(),"runtime":self.runtime.lock().unwrap().clone(),"updater":self.updater.status()}),
@@ -117,6 +119,11 @@ impl Core {
                 config::save_json(&self.profile.join("config.json"), &config)?;
                 *self.config.lock().unwrap() = config.clone();
                 self.changed.notify_one();
+                self.automatic_updates.send_if_modified(|enabled| {
+                    let changed = *enabled != config.auto_update_app;
+                    *enabled = config.auto_update_app;
+                    changed
+                });
                 self.configure_rpc().await;
                 if !config.spotify_local_playback {
                     spotify_bridge::disable().await;
@@ -231,10 +238,13 @@ async fn run(profile: PathBuf) -> Result<(), String> {
     let saved = json!({"width":width,"height":height,"maximized":saved.maximized});
     let output = Arc::new(Output(Mutex::new(std::io::stdout())));
     let runtime = json!({"activeMod":config.active_mod,"safeMode":safe,"ready":false,"shelter":false,"modules":0,"media":false,"screenSharing":false,"error":null,"version":env!("CARGO_PKG_VERSION"),"platform":"linux"});
+    let (automatic_updates, update_preferences) =
+        tokio::sync::watch::channel(config.auto_update_app);
     let core = Arc::new(Core {
         profile,
         config: Arc::new(Mutex::new(config)),
         changed: Arc::new(tokio::sync::Notify::new()),
+        automatic_updates,
         output: output.clone(),
         runtime: Mutex::new(runtime),
         rpc: tokio::sync::Mutex::new(None),
@@ -245,6 +255,20 @@ async fn run(profile: PathBuf) -> Result<(), String> {
     });
     core.recovery(false)?;
     core.configure_rpc().await;
+    if !core.smoke && std::env::var_os("APPIMAGE").is_some() {
+        let core = Arc::downgrade(&core);
+        tokio::spawn(update_schedule::run(update_preferences, move || {
+            let core = core.upgrade();
+            async move {
+                if let Some(core) = core {
+                    let preview = core.config.lock().unwrap().preview_updates;
+                    if let Err(error) = core.updater.check(preview).await {
+                        eprintln!("Update check failed: {error}");
+                    }
+                }
+            }
+        }));
+    }
     output.send(json!({"event":"ready","config":core.config.lock().unwrap().clone(),"window":saved,"safeMode":safe,"version":env!("CARGO_PKG_VERSION")}));
     let mut stdin = BufReader::new(tokio::io::stdin());
     let semaphore = Arc::new(tokio::sync::Semaphore::new(8));

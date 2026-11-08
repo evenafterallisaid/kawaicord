@@ -43,28 +43,43 @@ export function createDiscordSettings(invoke: Invoke): HTMLElement {
       const [notice, setNotice] = solid.createSignal('');
       const [update, setUpdate] = solid.createSignal(data.updater.message);
       const [available, setAvailable] = solid.createSignal(data.updater.available);
-      const [spotify, setSpotify] = solid.createSignal('Check Spotify after a failed Listen Along attempt. This reads connection state and playback response codes without changing playback.');
+      const [spotify, setSpotify] = solid.createSignal('');
+      const [voice, setVoice] = solid.createSignal('');
       const component = (name: string, props: Record<string, unknown>) => solid.createComponent(ui[name], props);
       const append = (parent: HTMLElement, ...children: any[]) => { const marker = document.createComment(''); parent.append(marker); solidWeb.insert(parent, children, marker); };
       const heading = (text: string) => component('Header', { tag: ui.HeaderTags.HeadingLG, children: text });
       const text = (value: string) => component('Text', { tag: ui.TextTags.textSM, style: { color: 'var(--text-muted)', 'margin-bottom': '20px' }, children: value });
       const divider = () => component('Divider', { mt: '24px', mb: '24px' });
-      const buttons = (...children: any[]) => { const row = document.createElement('div'); row.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 24px'; append(row, ...children); return row; };
+      const buttons = (...children: any[]) => { const row = document.createElement('div'); row.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 16px'; append(row, ...children); return row; };
+      function section(title: string) {
+        const details = document.createElement('details');
+        details.style.cssText = 'border-top:1px solid var(--border-subtle);padding:12px 0';
+        const summary = document.createElement('summary');
+        summary.style.cssText = 'cursor:pointer;font-weight:600;color:var(--header-primary);padding:4px 0';
+        summary.textContent = title;
+        const content = document.createElement('div');
+        content.style.paddingTop = '12px';
+        details.append(summary, content);
+        root.append(details);
+        return content;
+      }
+      const status = (value: () => string) => component('Text', {
+        role: 'status', tag: ui.TextTags.textSM, style: { color: 'var(--text-muted)' }, get children() { return value(); }
+      });
       async function act(fn: () => Promise<void>) {
         if (busy()) return;
         setBusy(true); setNotice('');
         try { await fn(); } catch (error) { setNotice(String(error)); } finally { setBusy(false); }
       }
-      const button = (title: string, action: () => Promise<void>, primary = false) => component('Button', {
+      const button = (title: string, action: () => Promise<void>, primary = false, inactive = () => false) => component('Button', {
         children: title, color: primary ? ui.ButtonColors.PRIMARY : ui.ButtonColors.SECONDARY,
         size: ui.ButtonSizes.MEDIUM, grow: true,
-        get disabled() { return busy(); }, onClick: () => void act(action)
+        get disabled() { return busy() || inactive(); }, onClick: () => void act(action)
       });
       root.replaceChildren();
       append(root,
         component('Header', { tag: ui.HeaderTags.HeadingXL, children: 'Kawaicord' }),
-        text(`Version ${data.runtime.version}`), heading('Client mod'),
-        text('Shelter runs alongside your selected client mod. Restart to apply a change.'),
+        text(`Version ${data.runtime.version}`), status(notice), heading('Client mod'),
         component('Select', {
           'aria-label': 'Client mod', get value() { return selected(); }, get disabled() { return busy(); },
           onChange: (value: ClientMod) => setSelected(value),
@@ -73,26 +88,31 @@ export function createDiscordSettings(invoke: Invoke): HTMLElement {
         buttons(button('Save and restart', async () => {
           setConfig(await invoke<Config>('save_config', { config: { ...config(), activeMod: selected() } }));
           await invoke('restart_app');
-        }, true)),
-        divider(), heading('Background and desktop')
+        }, true, () => selected() === config().activeMod)),
+        divider(), heading('Essentials')
       );
-      for (const [key, title, note] of options) {
-        if (key === 'notifications') append(root, divider(), heading('Desktop integration'));
-        if (key === 'autoUpdateMods') append(root, divider(), heading('Update preferences'));
-        append(root, component('SwitchItem', {
-        children: title, note, get checked() { return config()[key] === true; }, get disabled() { return busy(); },
-        onChange: (value: boolean) => void act(async () => setConfig(await invoke<Config>('save_config', { config: { ...config(), [key]: value } })))
-      }));
+      function switches(parent: HTMLElement, keys: (keyof Config)[]) {
+        for (const key of keys) {
+          const option = options.find(([name]) => name === key);
+          if (!option) continue;
+          const [, title, note] = option;
+          append(parent, component('SwitchItem', {
+            children: title, note, get checked() { return config()[key] === true; }, get disabled() { return busy(); },
+            onChange: (value: boolean) => void act(async () => setConfig(await invoke<Config>('save_config', { config: { ...config(), [key]: value } })))
+          }));
+        }
       }
-      append(root, divider(), heading('Voice diagnostics'), text('Test local audio transport without opening your microphone or sending audio to anyone.'), buttons(button('Test audio transport', async () => { const result = await testAudioTransport(); setNotice(result.ok ? 'Local audio transport works. If Discord rejects calls, check browser compatibility and microphone permissions.' : result.error ?? 'Audio test failed.'); })));
-      append(root, divider(), heading('Spotify connection'), component('Text', { tag: ui.TextTags.textSM, style: { color: 'var(--text-muted)' }, get children() { return spotify(); } }), buttons(button('Check Spotify connection', async () => { await refreshSpotifyLocal(); setSpotify(spotifyDiagnostics().summary); })));
-      append(root, component('SwitchItem', {
-        children: 'Use Spotify companion', note: 'Use the Spotify companion to play and sync locally when Spotify accepts remote playback but stays blank. Requires Spicetify and Spotify Premium.',
+      switches(root, ['notifications', 'minimizeToTray', 'performanceMode']);
+      switches(section('Desktop and activity'), ['trayEnabled', 'startAtLogin', 'staticNameplates', 'richPresence', 'detectGames']);
+      const spotifySection = section('Spotify');
+      append(spotifySection, status(spotify), buttons(button('Check Spotify connection', async () => { await refreshSpotifyLocal(); setSpotify(spotifyDiagnostics().summary); })));
+      append(spotifySection, component('SwitchItem', {
+        children: 'Use Spotify companion', note: 'An alternative for Listen Along that requires Spicetify and Spotify Premium.',
         get checked() { return config().spotifyLocalPlayback; }, get disabled() { return busy(); },
         onChange: (value: boolean) => void act(async () => setConfig(await invoke<Config>('save_config', { config: { ...config(), spotifyLocalPlayback: value, spotifyNativePlayback: value ? false : config().spotifyNativePlayback } })))
-      }), text('Companion setup adds a Spicetify extension and applies it with your existing customization. Spotify stays open; quit and reopen it afterward. Your Spicetify configuration is backed up.'),
+      }), text('Setup backs up your Spicetify configuration. Reopen Spotify afterward.'),
       buttons(button('Install Spotify companion', async () => { const result = await invoke<{message:string}>('spotify_bridge', { request: { action: 'install' } }); setSpotify(result.message); })));
-      if (data.runtime.platform === 'macos' || data.runtime.platform === 'linux') append(root, component('SwitchItem', {
+      if (data.runtime.platform === 'macos' || data.runtime.platform === 'linux') append(spotifySection, component('SwitchItem', {
         children: 'Use native Spotify control',
         note: data.runtime.platform === 'macos' ? 'Sync through Spotify’s macOS automation interface without Spicetify. macOS asks permission to control Spotify. Spotify Premium is still required for Listen Along.' : 'Sync through Spotify’s desktop MPRIS interface without Spicetify. Requires a running Spotify app with MPRIS support and Spotify Premium.',
         get checked() { return config().spotifyNativePlayback; }, get disabled() { return busy(); },
@@ -101,15 +121,19 @@ export function createDiscordSettings(invoke: Invoke): HTMLElement {
       const install = document.createElement('span');
       append(install, button('Install update and restart', async () => { setUpdate('Downloading and verifying the update…'); try { await invoke('install_update'); } catch (error) { setUpdate(String(error)); throw error; } }, true));
       solid.createEffect(() => { install.style.display = available() ? '' : 'none'; });
-      append(root, divider(), heading('Updates'), component('Text', {
-        tag: ui.TextTags.textSM, style: { color: 'var(--text-muted)' }, get children() { return update(); }
-      }), buttons(button('Check for updates', async () => {
+      const updates = section('Updates');
+      append(updates, status(update), buttons(button('Check for updates', async () => {
         setAvailable(false); setUpdate('Checking for updates…');
         try { const result = await invoke<{ available: boolean; message: string }>('check_update'); setUpdate(result.message); setAvailable(result.available); } catch (error) { setUpdate(String(error)); throw error; }
-      }), install, button('Refresh mod bundles', async () => { await invoke('refresh_mods'); setNotice('Client mods are ready. Restart Kawaicord to apply them.'); })),
-      divider(), heading('Recovery'), text(data.runtime.error ?? (data.runtime.safeMode ? 'Recovery mode is active. Your selected client mod is paused.' : 'Having trouble loading? Recovery mode keeps Shelter and temporarily pauses your client mod.')),
-      buttons(button(data.runtime.safeMode ? 'Restart normally' : 'Restart in recovery mode', async () => { await invoke(data.runtime.safeMode ? 'restart_app' : 'restart_recovery'); })),
-      component('Text', { tag: ui.TextTags.textSM, style: { color: 'var(--text-muted)' }, get children() { return notice(); } }));
+      }), install, button('Refresh mod bundles', async () => { await invoke('refresh_mods'); setUpdate('Client mods are ready. Restart Kawaicord to apply them.'); })));
+      switches(updates, ['autoUpdateApp', 'autoUpdateMods', 'previewUpdates']);
+      const recovery = section('Troubleshooting');
+      if (data.runtime.error || data.runtime.safeMode) (recovery.parentElement as HTMLDetailsElement).open = true;
+      append(recovery, status(voice), buttons(button('Test audio transport', async () => {
+        const result = await testAudioTransport();
+        setVoice(result.ok ? 'Local audio transport works.' : result.error ?? 'Audio test failed.');
+      })), text(data.runtime.error ?? (data.runtime.safeMode ? 'Recovery mode is active.' : 'Recovery mode temporarily pauses your client mod.')),
+      buttons(button(data.runtime.safeMode ? 'Restart normally' : 'Restart in recovery mode', async () => { await invoke(data.runtime.safeMode ? 'restart_app' : 'restart_recovery'); })));
     });
   }).catch(error => { if (!disposed) root.textContent = `Could not load Kawaicord settings: ${String(error)}`; });
   return root;

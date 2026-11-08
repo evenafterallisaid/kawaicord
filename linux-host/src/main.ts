@@ -28,12 +28,12 @@ let safeMode = false;
 let sequence = 0;
 let externalOpens = 0;
 const windows = new Map<number, ClientWindow>();
-const scriptCache = new Map<string, string>();
+let scriptGeneration = 0;
 const notifications = new Map<string, Notification>();
 const temporarySlots = new Set<number>();
 const grants: Record<string, boolean> = readJson(join(profile, 'media-permissions.json'), {});
 const savedSessions: Record<string, boolean> = readJson(join(profile, 'chromium-sessions.json'), {});
-interface ClientWindow { window: BrowserWindow; initialization: string; id?: string; name: string; domain: string; saveSession: boolean; ready: boolean; user: unknown; recovery?: boolean; slot?: number; diagnosed?: boolean; crashes: number; closed: Promise<void> }
+interface ClientWindow { window: BrowserWindow; initialization: string; scriptKey?: string; id?: string; name: string; domain: string; saveSession: boolean; ready: boolean; user: unknown; recovery?: boolean; slot?: number; diagnosed?: boolean; crashes: number; closed: Promise<void> }
 function readJson<T>(path: string, fallback: T): T { try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return fallback; } }
 function saveJson(path: string, data: unknown) { mkdirSync(profile, { recursive: true }); const temporary=path+`.tmp-${process.pid}`; writeFileSync(temporary, JSON.stringify(data), { mode: 0o600 }); renameSync(temporary, path); }
 function hash(value: string) { return createHash('sha256').update(value).digest('hex'); }
@@ -88,9 +88,11 @@ function configureSession(ses: Session) {
   }, { useSystemPicker: true });
 }
 async function initialization(id?: string, performanceMode = config.performanceMode, recover = safeMode) {
-  const key = `${performanceMode}:${recover}`;
-  if (!scriptCache.has(key)) scriptCache.set(key, await core.request('initialize', { id, performanceMode, safeMode: recover }));
-  return scriptCache.get(key)!;
+  const scriptKey = `${scriptGeneration}:${!!id}:${performanceMode}:${recover}`;
+  const existing = [...windows.values()].find(record => record.scriptKey === scriptKey);
+  const source: unknown = existing?.initialization ?? await core.request('initialize', { id, performanceMode, safeMode: recover });
+  if (typeof source !== 'string') throw new Error('The Rust service did not return a Discord startup script');
+  return { initialization: source, scriptKey };
 }
 async function createWindow(id?: string, name = 'Kawaicord', persistent = true, domain = 'discord.com', performanceMode = config.performanceMode): Promise<ClientWindow> {
   if (!['discord.com', 'ptb.discord.com', 'canary.discord.com'].includes(domain)) throw new Error('Unsupported Discord domain');
@@ -109,7 +111,7 @@ async function createWindow(id?: string, name = 'Kawaicord', persistent = true, 
   const saved = !id ? readJson(join(profile, 'window.json'), { width: 1180, height: 820, maximized: false }) : { width: 1100, height: 800, maximized: false };
   const win = new BrowserWindow({ title: name.slice(0, 80), width: Math.min(10000, Math.max(800, saved.width || 1180)), height: Math.min(8000, Math.max(600, saved.height || 820)), minWidth: 800, minHeight: 600, frame: false, show: !smoke, icon, backgroundColor: '#111214', autoHideMenuBar: true, webPreferences: { preload: join(__dirname, 'preload.cjs'), session: ses, contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false, autoplayPolicy: 'no-user-gesture-required' } });
   let closed!: () => void;
-  const record: ClientWindow = { window: win, initialization: source, id, name, domain, saveSession: persistent, slot, ready: false, user: null, crashes: 0, closed: new Promise(resolve => { closed = resolve; }) };
+  const record: ClientWindow = { window: win, ...source, id, name, domain, saveSession: persistent, slot, ready: false, user: null, crashes: 0, closed: new Promise(resolve => { closed = resolve; }) };
   windows.set(win.webContents.id, record); win.removeMenu();
   if (id && persistent) { savedSessions[id] = true; saveJson(join(profile, 'chromium-sessions.json'), savedSessions); }
   win.webContents.on('before-input-event', (event, input) => { if (input.type === 'keyDown' && input.control && input.key.toLowerCase() === 'q') { event.preventDefault(); void quit(); } });
@@ -119,7 +121,7 @@ async function createWindow(id?: string, name = 'Kawaicord', persistent = true, 
   win.webContents.on('render-process-gone', async () => {
     record.ready = false; record.crashes++;
     if (quitting || record.crashes > 2) { if (!smoke) await recovery(); return; }
-    if (record.crashes === 2) record.initialization = await initialization(id, performanceMode, true);
+    if (record.crashes === 2) Object.assign(record, await initialization(id, performanceMode, true));
     win.reload();
   });
   let previous = '';
@@ -207,7 +209,7 @@ ipcMain.handle('kawaicord:invoke', async (event, command: string, data: Record<s
     }
     case 'get_settings': return core.dead ? { config, runtime: { ...runtime, error: 'The Rust service stopped. Restart Kawaicord when ready.' }, updater: { available: false, message: 'The Rust service is unavailable.' } } : core.request(command);
     case 'save_config': {
-      const oldStartup = config.startAtLogin; config = await core.request(command, data); scriptCache.clear();
+      const oldStartup = config.startAtLogin; config = await core.request(command, data); scriptGeneration++;
       setTray(); if (oldStartup !== config.startAtLogin) loginStartup();
       for (const window of windows.values()) if (!window.recovery) void evaluate(window, `window.__kawaicordUpdateConfig?.(${JSON.stringify(window.id ? { ...config, spotifyLocalPlayback: false, spotifyNativePlayback: false } : config)})`).catch(() => {});
       return config;
@@ -216,7 +218,7 @@ ipcMain.handle('kawaicord:invoke', async (event, command: string, data: Record<s
     case 'cloud_request': return core.request(command, { ...data, origin: new URL(event.senderFrame!.url).origin });
     case 'restart_app': return restart();
     case 'restart_recovery': return restart(true);
-    case 'reload_discord': record.initialization = await initialization(record.id); record.window.reload(); return;
+    case 'reload_discord': Object.assign(record, await initialization(record.id)); record.window.reload(); return;
     case 'open_releases': return shell.openExternal('https://github.com/evenafterallisaid/kawaicord/releases');
     case 'open_settings': if (data.fallback) return recovery(); return settings();
     case 'show_discord': show(); if (record.recovery) record.window.close(); return;
@@ -226,7 +228,7 @@ ipcMain.handle('kawaicord:invoke', async (event, command: string, data: Record<s
     case 'close_all_instances': await closeInstances(); return;
     case 'clear_instance_session': await clearSession(instanceId(data.id)); return;
     case 'report_instance_user': { if (record.id && data.user && typeof data.user === 'object') record.user = { id: String(data.user.id ?? '').slice(0, 32), username: String(data.user.username ?? '').slice(0, 80), globalName: typeof data.user.globalName === 'string' ? data.user.globalName.slice(0, 80) : null, avatarUrl: typeof data.user.avatarUrl === 'string' && data.user.avatarUrl.startsWith('https://cdn.discordapp.com/') ? data.user.avatarUrl.slice(0, 500) : '' }; return; }
-    case 'refresh_mods': await core.request(command); scriptCache.clear(); return;
+    case 'refresh_mods': await core.request(command); scriptGeneration++; return;
     case 'install_update': { const result = await core.request(command); if (result?.restart) return restart(); return; }
     default: return core.request(command, data);
   }
@@ -267,6 +269,7 @@ async function diagnose(record: ClientWindow, status: any) {
     await evaluate(record,"(()=>{shelter.solid.createRoot(()=>document.body.append(window.__kawaicordSettingsPage()));return true})()");
     for (let attempt=0;attempt<30;attempt++) { if(await evaluate(record,"document.querySelectorAll('#kawaicord-settings input[type=checkbox]').length>=9")) break; await new Promise(resolve=>setTimeout(resolve,100)); }
     if (!await evaluate(record,"document.querySelectorAll('#kawaicord-settings input[type=checkbox]').length>=9")) throw new Error('Discord settings did not render');
+    if (!await evaluate(record,"(()=>{const groups=[...document.querySelectorAll('#kawaicord-settings details')];if(groups.length!==4||groups.some(group=>group.open))return false;for(const group of groups)group.querySelector('summary').click();return groups.every(group=>group.open)})()")) throw new Error('Settings sections did not expand');
     if (!await evaluate(record,"Array.from(document.querySelectorAll('#kawaicord-settings button')).filter(b=>b.getClientRects().length).every(b=>b.scrollWidth<=b.clientWidth+1)")) throw new Error('Settings button labels overflow');
     const cloud=await evaluate(record,"fetch('https://cloud.equicord.org/v1/oauth/settings').then(r=>r.json()).then(v=>!!v.clientId&&!!v.redirectUri)"); if(!cloud) throw new Error('Cloud configuration failed');
     if(!await evaluate(record,"typeof window.VencordNative?.pluginHelpers?.MultiInstance?.openInstance==='function'")) throw new Error('Native instance helper is missing');
@@ -294,7 +297,6 @@ async function start() {
   app.on('before-quit',event=>{if(!quitting){event.preventDefault();void quit();}});
   app.on('window-all-closed',()=>{});
   app.on('web-contents-created',(_event,contents)=>{contents.on('will-attach-webview',event=>event.preventDefault());});
-  if(!smoke){const check=()=>{if(config.autoUpdateApp)void core.request('check_update').catch(()=>{});};setTimeout(()=>{check();setInterval(check,6*3600_000).unref();},60000).unref();}
 }
 app.on('second-instance',()=>show());
 if(!smoke&&!app.requestSingleInstanceLock())app.quit();else void start().catch(error=>{console.error(String(error));if(!smoke)dialog.showErrorBox('Kawaicord could not start','The native service could not be initialized. Try reinstalling the current release.');app.exit(1);});
