@@ -33,21 +33,31 @@ export function nameplateCompatibility() {
   }
   function scan(node: Node) {
     if (node instanceof HTMLVideoElement) inspect(node);
-    if (node instanceof Element) for (const video of node.querySelectorAll('video')) inspect(video);
+    else if (node instanceof HTMLSourceElement && node.parentElement instanceof HTMLVideoElement) inspect(node.parentElement);
+    else if (node instanceof Element && node.firstElementChild) {
+      for (const video of node.querySelectorAll('video')) inspect(video);
+    }
   }
   const observer = new MutationObserver(records => {
+    let removed = false;
     for (const record of records) {
       if (record.type === 'attributes') {
         if (record.target instanceof HTMLVideoElement) inspect(record.target);
         else if (record.target instanceof HTMLSourceElement && record.target.parentElement instanceof HTMLVideoElement) inspect(record.target.parentElement);
-      } else for (const node of record.addedNodes) scan(node);
+      } else {
+        removed ||= record.removedNodes.length > 0;
+        for (const node of record.addedNodes) scan(node);
+      }
     }
-    for (const [video, state] of posters) if (!video.isConnected) { state.image.remove(); posters.delete(video); }
+    if (removed) {
+      for (const [video, state] of posters) if (!video.isConnected) { state.image.remove(); posters.delete(video); }
+    }
   });
   document.addEventListener('play', event => {
     if (enabled && event.target instanceof HTMLVideoElement && posters.has(event.target)) event.target.pause();
   }, true);
   return (value: boolean) => {
+    if (value === enabled) return;
     enabled = value; observer.disconnect();
     if (value) { scan(document.documentElement); observer.observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] }); }
     else { for (const [video, state] of posters) { video.style.visibility = state.visibility; state.image.remove(); if (state.playing && video.isConnected) void video.play().catch(() => {}); } posters.clear(); }

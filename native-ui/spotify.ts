@@ -1,24 +1,23 @@
 import { spotifyPlaybackBeginning, spotifyPlaybackCompleted, spotifyLocalStatus } from './spotify-local';
 interface SpotifyRequest { endpoint: string; method: string; status: number; at: number }
-const endpoints = new Set(['/v1/me/player', '/v1/me/player/play', '/v1/me/player/devices', '/v1/me/player/seek']);
 let latestPlay: SpotifyRequest | undefined;
 let installed = false;
 let sequence = 0;
 
-function endpointFor(input: string): string | undefined {
+function isPlaybackUrl(input: string): boolean {
   try {
     const url = new URL(input, location.href);
-    if (url.protocol === 'https:' && url.hostname === 'api.spotify.com' && url.port === '' && endpoints.has(url.pathname)) return url.pathname;
-  } catch {}
+    return url.protocol === 'https:' && url.hostname === 'api.spotify.com' &&
+      url.port === '' && url.pathname === '/v1/me/player/play';
+  } catch { return false; }
 }
 
 // retain status codes only. tokens, account ids, track ids, and request bodies stay out.
 export function installSpotifyDiagnostics() {
   if (installed) return;
   installed = true;
-  const begin = (endpoint: string | undefined, method: string) => {
-    if (endpoint !== '/v1/me/player/play' || method !== 'PUT') return 0;
-    latestPlay = { endpoint, method, status: -1, at: Date.now() };
+  const begin = () => {
+    latestPlay = { endpoint: '/v1/me/player/play', method: 'PUT', status: -1, at: Date.now() };
     spotifyPlaybackBeginning(++sequence);
     return sequence;
   };
@@ -26,33 +25,33 @@ export function installSpotifyDiagnostics() {
     if (attempt) { if (attempt === sequence && latestPlay) latestPlay.status = status; spotifyPlaybackCompleted(attempt); }
   };
   const originalFetch = window.fetch;
-  window.fetch = async function(input, init) {
-    const endpoint = endpointFor(input instanceof Request ? input.url : String(input));
-    const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
-    const attempt = begin(endpoint, method);
-    try {
-      const response = await originalFetch.call(this, input, init);
+  window.fetch = function(input, init) {
+    const request = input instanceof Request;
+    const method = (init?.method ?? (request ? input.method : 'GET')).toUpperCase();
+    if (method !== 'PUT' || !isPlaybackUrl(request ? input.url : String(input))) {
+      return originalFetch.call(this, input, init);
+    }
+    const attempt = begin();
+    return originalFetch.call(this, input, init).then(response => {
       complete(attempt, response.status);
       return response;
-    } catch (error) {
+    }, error => {
       complete(attempt, 0);
       throw error;
-    }
+    });
   };
-  const requests = new WeakMap<XMLHttpRequest, { endpoint: string; method: string }>();
+  const requests = new WeakSet<XMLHttpRequest>();
   const originalOpen = XMLHttpRequest.prototype.open;
   const originalSend = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.open = function(this: XMLHttpRequest, method: string, url: string | URL, ...rest: any[]) {
     const result = (originalOpen as any).call(this, method, url, ...rest);
-    const endpoint = endpointFor(String(url));
-    if (endpoint) requests.set(this, { endpoint, method: method.toUpperCase() });
+    if (method.toUpperCase() === 'PUT' && isPlaybackUrl(String(url))) requests.add(this);
     else requests.delete(this);
     return result;
   } as typeof originalOpen;
   XMLHttpRequest.prototype.send = function(body) {
-    const request = requests.get(this);
-    if (!request) return originalSend.call(this, body);
-    const attempt = begin(request.endpoint, request.method);
+    if (!requests.has(this)) return originalSend.call(this, body);
+    const attempt = begin();
     const ended = () => complete(attempt, this.status);
     this.addEventListener('loadend', ended, { once: true });
     try { return originalSend.call(this, body); }

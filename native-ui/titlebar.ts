@@ -176,15 +176,29 @@ export function installTitlebar(invoke: Invoke) {
       bar = Array.from(document.querySelectorAll<HTMLElement>('div[class*="title"] + div[class*="trailing"]'))
         .find(element => element.parentElement!.getBoundingClientRect().top < 64)?.parentElement ?? undefined;
       size.disconnect(); if (bar) size.observe(bar);
+      watchMount();
     }
     const trailing = bar?.querySelector<HTMLElement>(':scope > div[class*="trailing"]');
     const right = trailing ? Math.max(146, Math.round(innerWidth - trailing.getBoundingClientRect().left + 8)) : 250;
     drag.style.right = `${right}px`;
   }
   function schedule() { if (!pending && !document.hidden) { pending = true; requestAnimationFrame(layout); } }
-  // normal chat updates do not trigger layout work once the app bar is mounted.
-  const mount = new MutationObserver(() => { if (!bar?.isConnected) schedule(); });
-  mount.observe(document.body, { childList: true, subtree: true });
+  const mount = new MutationObserver(() => {
+    if (bar?.isConnected) watchMount();
+    else schedule();
+  });
+  function watchMount() {
+    mount.disconnect();
+    if (!bar) {
+      mount.observe(document.documentElement, { childList: true, subtree: true });
+      return;
+    }
+    // watch for the bar or any of its containers being replaced, without observing chat descendants.
+    for (let parent = bar.parentElement; parent; parent = parent.parentElement) {
+      mount.observe(parent, { childList: true });
+    }
+  }
+  watchMount();
   window.addEventListener('resize', schedule);
   document.addEventListener('visibilitychange', schedule);
   window.addEventListener('pagehide', () => { mount.disconnect(); size.disconnect(); }, { once: true });

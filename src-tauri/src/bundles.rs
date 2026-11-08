@@ -2,7 +2,9 @@ use crate::config::{self, ClientMod};
 use base64::Engine;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::{fs, path::Path, sync::OnceLock, time::Duration};
+use std::{
+    borrow::Cow, collections::HashMap, fmt::Write, fs, path::Path, sync::OnceLock, time::Duration,
+};
 
 const SHELTER: &str = include_str!("../../shelter/shelter.js");
 const VENCORD: &str = include_str!("../../vencord/vencord.js");
@@ -26,15 +28,22 @@ pub fn plausible(content: &str, css: bool) -> bool {
 pub fn patch_bundle(source: &str) -> String {
     const BROKEN_LOGO: &str =
         "https://github.com/ImHisako/ImHisako/blob/main/Images/Illegalcord.png?raw=true";
-    let mut patched = patch_restarts(source).replacen(
-        "pluginHelpers:{}",
-        "pluginHelpers:(window.__kawaicordPluginHelpers??{})",
-        1,
-    );
-    let icons: std::collections::HashMap<String, String> =
-        serde_json::from_str(include_str!("../../native-data/mod-icons.json")).unwrap();
-    for (url, data) in icons {
-        patched = patched.replace(&url, &data);
+    const HELPERS: &str = "pluginHelpers:{}";
+    static ICONS: OnceLock<HashMap<&str, &str>> = OnceLock::new();
+    let mut patched = patch_restarts(source).into_owned();
+    if let Some(index) = patched.find(HELPERS) {
+        patched.replace_range(
+            index..index + HELPERS.len(),
+            "pluginHelpers:(window.__kawaicordPluginHelpers??{})",
+        );
+    }
+    let icons = ICONS.get_or_init(|| {
+        serde_json::from_str(include_str!("../../native-data/mod-icons.json")).unwrap()
+    });
+    for (&url, &data) in icons {
+        if patched.contains(url) {
+            patched = patched.replace(url, data);
+        }
     }
     if !patched.contains(BROKEN_LOGO) {
         return patched;
@@ -53,10 +62,10 @@ pub fn patch_bundle(source: &str) -> String {
         )
     )
 }
-pub fn patch_restarts(source: &str) -> String {
+fn patch_restarts(source: &str) -> Cow<'_, str> {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"(?m)(^|[^\w$.])(?:(?:window|globalThis|document)\s*\.\s*)?location\s*\.\s*reload\s*\(\s*(?:true|false)?\s*\)").unwrap())
-        .replace_all(source, "${1}window.kawaicord.restart()").into_owned()
+        .replace_all(source, "${1}window.kawaicord.restart()")
 }
 pub fn source(mod_: ClientMod) -> (&'static str, &'static str) {
     match mod_ {
@@ -71,40 +80,67 @@ pub fn source(mod_: ClientMod) -> (&'static str, &'static str) {
 fn read_cache(path: &Path, css: bool) -> Option<String> {
     fs::read_to_string(path).ok().filter(|v| plausible(v, css))
 }
+fn mod_bundle(profile: &Path, mod_: ClientMod) -> (Cow<'static, str>, Cow<'static, str>) {
+    let (fallback_js, fallback_css) = source(mod_);
+    let dir = profile.join("bundles").join(mod_.id());
+    // a cache pair is committed together. incomplete downloads never mask the installer fallback.
+    let manifest: CacheManifest = config::read_json(&dir.join("manifest.json"));
+    if !manifest.generation.is_empty()
+        && manifest
+            .generation
+            .bytes()
+            .all(|b| b.is_ascii_digit() || b == b'-')
+    {
+        let generation = dir.join(&manifest.generation);
+        if let Some((js, css)) = read_cache(&generation.join("browser.js"), false)
+            .zip(read_cache(&generation.join("browser.css"), true))
+        {
+            return (Cow::Owned(js), Cow::Owned(css));
+        }
+    }
+    (Cow::Borrowed(fallback_js), Cow::Borrowed(fallback_css))
+}
+
 pub fn initialization(
     profile: &Path,
     mod_: ClientMod,
     safe: bool,
     config: &crate::config::Config,
 ) -> Result<String, String> {
-    let dir = profile.join("bundles").join(mod_.id());
-    // a cache pair is committed together. incomplete downloads never mask the installer fallback.
-    let manifest: CacheManifest = config::read_json(&dir.join("manifest.json"));
-    let valid = !manifest.generation.is_empty()
-        && manifest
-            .generation
-            .bytes()
-            .all(|b| b.is_ascii_digit() || b == b'-');
-    let generation = dir.join(&manifest.generation);
-    let cached = if valid {
-        read_cache(&generation.join("browser.js"), false)
-            .zip(read_cache(&generation.join("browser.css"), true))
-    } else {
-        None
-    };
-    let (js, css) = cached.unwrap_or_else(|| {
-        let (j, c) = source(mod_);
-        (j.to_owned(), c.to_owned())
-    });
-    let shelter = read_cache(&profile.join("bundles/shelter.js"), false)
-        .unwrap_or_else(|| SHELTER.to_owned());
+    let shelter = read_cache(&profile.join("bundles/shelter.js"), false);
+    let shelter = shelter.as_deref().unwrap_or(SHELTER);
     let bootstrap = include_str!("../../web-dist/bootstrap.js");
     let settings = r#"const SHELTER_INJECTOR_PLUGINS={};const SHELTER_INJECTOR_SETTINGS=[['divider'],['header','Kawaicord'],['section','kawaicord','Settings',()=>window.__kawaicordSettingsPage()]];"#;
     let runtime = serde_json::json!({"activeMod":mod_, "safeMode":safe, "config":config,"version":env!("CARGO_PKG_VERSION"),"platform":std::env::consts::OS});
     // user scripts execute at document start in the page's main world. the mod
     // remains at global scope; no eval, network fetch, or async ipc races it.
     let origin_guard = "if(['https://discord.com','https://ptb.discord.com','https://canary.discord.com'].includes(location.origin)&&window===window.top){\n";
-    Ok(format!("{origin_guard}window.__KAWAICORD_BOOT__={runtime};\n{bootstrap}\n(()=>{{{settings}\n{shelter}\n}})();\n{}\nwindow.__kawaicordNativeStart?.({});\n}}", if safe {String::new()} else {format!("{}\n;globalThis.Vencord=Vencord;",patch_bundle(&js))}, serde_json::to_string(&css).map_err(|e|e.to_string())?))
+    let (js, css) = if safe {
+        (String::new(), String::from("\"\""))
+    } else {
+        let (js, css) = mod_bundle(profile, mod_);
+        (
+            patch_bundle(&js),
+            serde_json::to_string(&css).map_err(|e| e.to_string())?,
+        )
+    };
+    let mut script = String::with_capacity(
+        origin_guard.len()
+            + bootstrap.len()
+            + settings.len()
+            + shelter.len()
+            + js.len()
+            + css.len()
+            + 512,
+    );
+    write!(script, "{origin_guard}window.__KAWAICORD_BOOT__={runtime};\n{bootstrap}\n(()=>{{{settings}\n{shelter}\n}})();\n").expect("writing to a string cannot fail");
+    if !safe {
+        script.push_str(&js);
+        script.push_str("\n;globalThis.Vencord=Vencord;\n");
+    }
+    write!(script, "window.__kawaicordNativeStart?.({css});\n}}")
+        .expect("writing to a string cannot fail");
+    Ok(script)
 }
 async fn download(client: &reqwest::Client, url: &str, css: bool) -> Result<String, String> {
     let mut response = client
@@ -226,6 +262,20 @@ mod tests {
         let patched = patch_bundle(source(ClientMod::Illegalcord).0);
         assert!(!patched.contains("github.com/ImHisako/ImHisako/blob/main/Images/Illegalcord.png"));
         assert!(patched.contains("data:image/png;base64,iVBORw0KGgo"));
+    }
+    #[test]
+    fn safe_startup_keeps_shelter_without_serializing_the_selected_mod() {
+        let profile = std::env::temp_dir().join("kawaicord-bundle-test-no-profile");
+        let config = config::Config::default();
+        let safe = initialization(&profile, ClientMod::Illegalcord, true, &config).unwrap();
+        let normal = initialization(&profile, ClientMod::Illegalcord, false, &config).unwrap();
+
+        assert!(safe.contains("SHELTER_INJECTOR_SETTINGS"));
+        assert!(safe.contains("window.__kawaicordNativeStart?.(\"\")"));
+        assert!(!safe.contains("globalThis.Vencord=Vencord"));
+        assert!(normal.contains("globalThis.Vencord=Vencord"));
+        assert!(normal.contains("data:image/png;base64,iVBORw0KGgo"));
+        assert!(safe.len() < normal.len() / 10);
     }
     #[test]
     fn unrelated_reload_is_preserved() {

@@ -39,7 +39,9 @@ window.__kawaicordSettingsPage=()=>createDiscordSettings(invoke);
 let background=false;
 window.__kawaicordSetBackground=(hidden:boolean)=>{
   background=hidden;
-  if(document.documentElement)document.documentElement.dataset.kawaicordBackground=String(hidden&&boot.config.performanceMode);
+  const root = document.documentElement;
+  const paused = String(hidden && boot.config.performanceMode);
+  if (root && root.dataset.kawaicordBackground !== paused) root.dataset.kawaicordBackground = paused;
 };
 function style(css:string){const sheet=document.createElement('style');sheet.textContent=css;document.head.append(sheet);}
 function mounted(fn:()=>void){ if(document.head&&document.body)fn();else document.addEventListener('DOMContentLoaded',fn,{once:true}); }
@@ -65,18 +67,17 @@ document.addEventListener('keydown',event=>{
 window.__kawaicordNativeStart=(css:string)=>{
   if(!boot.safeMode)mounted(()=>style(css));
   const started=performance.now();
-  let checking=false;let done=false;
-  const timer=window.setInterval(check,500);
-  const observer=new MutationObserver(()=>{if(!checking){checking=true;queueMicrotask(()=>{checking=false;check();});}});
-  observer.observe(document,{childList:true,subtree:true});
+  // bound the startup checks even when discord is mounting or scrolling a busy view.
+  const timer=window.setInterval(check,250);
   function check(){
-    if(done)return;
+    const timedOut = performance.now() - started >= 60_000;
+    if (!window.shelter && !timedOut) return;
     const modules=Object.keys(window.Vencord?.Webpack?.cache??{}).length;
-    const root=document.getElementById('app-mount');
-    const mounted=!!root&&(root.textContent?.trim().length??0)>10;
-    const ready=!!window.shelter&&(boot.safeMode||modules>100)&&mounted;
-    if(!ready&&performance.now()-started<60000)return;
-    done=true;clearInterval(timer);observer.disconnect();
+    const modReady = boot.safeMode || modules > 100;
+    const ready = !!window.shelter && modReady &&
+      (document.getElementById('app-mount')?.textContent?.trim().length ?? 0) > 10;
+    if (!ready && !timedOut) return;
+    clearInterval(timer);
     if (ready) installSpotifyLocal(invoke, boot.config.spotifyLocalPlayback, boot.config.spotifyNativePlayback);
     const status:RuntimeStatus={activeMod:boot.activeMod,safeMode:boot.safeMode,shelter:!!window.shelter,modules,ready,
       media:typeof navigator.mediaDevices?.getUserMedia==='function',screenSharing:typeof navigator.mediaDevices?.getDisplayMedia==='function',
