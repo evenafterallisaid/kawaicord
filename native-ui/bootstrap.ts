@@ -25,6 +25,17 @@ declare global {
 // the bridge is scoped to discord and typed app actions. no filesystem or shell commands.
 const invoke = window.__TAURI_INTERNALS__.invoke.bind(window.__TAURI_INTERNALS__);
 const boot=window.__KAWAICORD_BOOT__;
+// cover the document before discord has applied its theme, then hand painting back to it.
+const startupCanvas = document.createElement('style');
+startupCanvas.textContent = 'html,body{background-color:#111214!important}';
+function paintStartupCanvas() {
+  if (!document.documentElement) return;
+  (document.head ?? document.documentElement).append(startupCanvas);
+  firstDocumentElement.disconnect();
+}
+const firstDocumentElement = new MutationObserver(paintStartupCanvas);
+if (document.documentElement) paintStartupCanvas();
+else firstDocumentElement.observe(document, { childList: true });
 const refreshNotificationPermission = installNotifications(invoke, () => boot.config.notifications);
 installCloudBridge(invoke);
 installExternalLinks(invoke);
@@ -72,11 +83,13 @@ window.__kawaicordNativeStart=(css:string)=>{
   const timer=window.setInterval(check,250);
   function check(){
     const timedOut = performance.now() - started >= 60_000;
+    const appMounted = (startupCanvas.isConnected || window.shelter) &&
+      (document.getElementById('app-mount')?.textContent?.trim().length ?? 0) > 10;
+    if (appMounted) startupCanvas.remove();
     if (!window.shelter && !timedOut) return;
     const modules=Object.keys(window.Vencord?.Webpack?.cache??{}).length;
     const modReady = boot.safeMode || modules > 100;
-    const ready = !!window.shelter && modReady &&
-      (document.getElementById('app-mount')?.textContent?.trim().length ?? 0) > 10;
+    const ready = !!window.shelter && modReady && appMounted === true;
     if (!ready && !timedOut) return;
     clearInterval(timer);
     if (ready) {

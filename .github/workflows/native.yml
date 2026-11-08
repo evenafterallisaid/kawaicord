@@ -159,12 +159,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           appimage="$RUNNER_TEMP/electron-builder/appimage-12.0.1"
+          icons="$RUNNER_TEMP/electron-builder/icons@1.2.3"
           fpm="$RUNNER_TEMP/fpm"
-          mkdir -p "$appimage" "$fpm"
+          mkdir -p "$appimage" "$icons" "$fpm"
           gh release download appimage-12.0.1 -R electron-userland/electron-builder-binaries -p appimage-12.0.1.7z -D "$appimage"
+          gh release download icons@1.2.3 -R electron-userland/electron-builder-binaries -p icons-bundle.tar.gz -D "$icons"
           gh release download fpm@2.1.4 -R electron-userland/electron-builder-binaries -p fpm-1.17.0-ruby-3.4.3-linux-amd64.7z -D "$fpm"
           sha256sum -c <<EOF
           d12ff7eb8f1d1ec4652ca5237a7fbdca33acc0c758045636feca62dc6ecb8ec4  $appimage/appimage-12.0.1.7z
+          4e5bb546c9d3ab0c2bbacc22857467bf415f742a34c2be9dd138779d2fc066f9  $icons/icons-bundle.tar.gz
           44b0ec6025c14ec137f56180e62675c0eae36233cdce53d0953d9c73ced8989f  $fpm/fpm-1.17.0-ruby-3.4.3-linux-amd64.7z
           EOF
           7z x "$fpm/fpm-1.17.0-ruby-3.4.3-linux-amd64.7z" "-o$fpm" >/dev/null
@@ -173,6 +176,8 @@ jobs:
           echo "ELECTRON_BUILDER_7ZIP_PATH=$(command -v 7z)" >> "$GITHUB_ENV"
           echo "CUSTOM_FPM_PATH=$fpm/fpm" >> "$GITHUB_ENV"
       - run: npm run package --prefix linux-host -- --publish never
+        env:
+          DEBUG: electron-builder
       - name: live discord startup with all three mods
         run: xvfb-run -a node scripts/linux-session.mjs linux-host/release/linux-unpacked/kawaicord
       - name: packaged voice engine and real audio loopback

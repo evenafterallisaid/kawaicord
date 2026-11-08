@@ -643,9 +643,14 @@ fn navigate_discord(window: &WebviewWindow, url: url::Url) -> Result<(), String>
     #[cfg(target_os = "macos")]
     window
         .with_webview(move |view| unsafe {
-            use objc2::{msg_send, runtime::AnyObject};
+            use objc2::{class, msg_send, runtime::AnyObject};
             use objc2_foundation::{ns_string, NSNumber, NSBundle, NSString};
             let inner = view.inner() as *mut AnyObject;
+            let background: *mut AnyObject = msg_send![
+                class!(NSColor), colorWithSRGBRed: 17.0f64 / 255.0,
+                green: 18.0f64 / 255.0, blue: 20.0f64 / 255.0, alpha: 1.0f64
+            ];
+            let _: () = msg_send![inner, setUnderPageBackgroundColor: background];
             // wkwebview omits safari identification, which discord needs for voice support.
             let version = NSBundle::bundleWithPath(&NSString::from_str("/Applications/Safari.app"))
                 .and_then(|bundle| bundle.objectForInfoDictionaryKey(ns_string!("CFBundleShortVersionString")))
