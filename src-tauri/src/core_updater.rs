@@ -92,35 +92,50 @@ impl Updater {
             .json()
             .await
             .map_err(|error| error.to_string())?;
-        let Some(asset) = crate::release_feed::select_manifest(&releases, preview) else {
+        let Some((published, asset)) = crate::release_feed::select_manifest(&releases, preview)
+        else {
             return Ok(Status {
                 available: false,
                 message: "No newer Linux release is published yet.".into(),
             });
         };
-        if !trusted(&asset.browser_download_url) {
-            return Err("Unexpected updater manifest origin".into());
-        }
-        let manifest: Manifest = client
-            .get(&asset.browser_download_url)
-            .timeout(Duration::from_secs(20))
-            .send()
-            .await
-            .map_err(|error| error.to_string())?
-            .error_for_status()
-            .map_err(|error| error.to_string())?
-            .json()
-            .await
-            .map_err(|error| error.to_string())?;
-        let version = semver::Version::parse(manifest.version.trim_start_matches('v'))
-            .map_err(|error| error.to_string())?;
         let current =
             semver::Version::parse(env!("CARGO_PKG_VERSION")).map_err(|error| error.to_string())?;
-        if version <= current || (!preview && !version.pre.is_empty()) {
+        if published <= current {
             return Ok(Status {
                 available: false,
                 message: "You're using the latest Linux release.".into(),
             });
+        }
+        let mut manifest = None;
+        for endpoint in crate::release_feed::manifest_urls(asset) {
+            let result = async {
+                client
+                    .get(endpoint)
+                    .header(reqwest::header::ACCEPT, "application/octet-stream")
+                    .timeout(Duration::from_secs(20))
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json::<Manifest>()
+                    .await
+            }
+            .await;
+            match result {
+                Ok(value) => {
+                    manifest = Some(value);
+                    break;
+                }
+                Err(error) => eprintln!("Update manifest check failed: {error}"),
+            }
+        }
+        let manifest = manifest.ok_or(
+            "Could not download the update information. Try again or use the Releases page.",
+        )?;
+        let version = semver::Version::parse(manifest.version.trim_start_matches('v'))
+            .map_err(|error| error.to_string())?;
+        if version != published {
+            return Err("The update manifest does not match the published version.".into());
         }
         let payload = manifest
             .platforms

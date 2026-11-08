@@ -1,6 +1,6 @@
 #[cfg(test)]
 use crate::release_feed::Asset;
-use crate::release_feed::{select_manifest, Release};
+use crate::release_feed::{manifest_urls, select_manifest, Release};
 use serde::Serialize;
 use std::{
     sync::{
@@ -90,31 +90,46 @@ async fn check_inner(app: &AppHandle) -> Result<Status, String> {
         .map_err(|error| error.to_string())?
         .preview_updates;
     let manifest = select_manifest(&releases, allow_preview);
-    let Some(manifest) = manifest else {
+    let Some((version, manifest)) = manifest else {
         return Ok(Status {
             available: false,
             message: "No newer native release is published yet.".into(),
         });
     };
-    let url = url::Url::parse(&manifest.browser_download_url).map_err(|e| e.to_string())?;
-    if url.scheme() != "https"
-        || url.host_str() != Some("github.com")
-        || !url
-            .path()
-            .starts_with("/evenafterallisaid/kawaicord/releases/download/")
-    {
+    let current = semver::Version::parse(env!("CARGO_PKG_VERSION")).map_err(|e| e.to_string())?;
+    if version <= current {
+        return Ok(Status {
+            available: false,
+            message: "You're using the latest native release.".into(),
+        });
+    }
+    let endpoints = manifest_urls(manifest);
+    if endpoints.is_empty() {
         return Err("Unexpected updater manifest origin".into());
     }
     let update = app
         .updater_builder()
         .timeout(Duration::from_secs(120))
-        .endpoints(vec![url])
+        .header("Accept", "application/octet-stream")
+        .map_err(|e| e.to_string())?
+        .endpoints(endpoints)
         .map_err(|e| e.to_string())?
         .build()
         .map_err(|e| e.to_string())?
         .check()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| {
+            app.state::<super::AppState>()
+                .log(&format!("Update manifest check failed: {error}"));
+            "Could not download the update information. Try again or use the Releases page."
+                .to_string()
+        })?;
+    if update
+        .as_ref()
+        .is_some_and(|candidate| candidate.version != version.to_string())
+    {
+        return Err("The update manifest does not match the published version.".into());
+    }
     let status = match &update {
         Some(u) => Status {
             available: true,
@@ -161,6 +176,7 @@ mod tests {
             assets: vec![Asset {
                 name: "latest.json".into(),
                 browser_download_url: version.into(),
+                api_url: String::new(),
             }],
         }
     }
@@ -174,6 +190,7 @@ mod tests {
         assert_eq!(
             select_manifest(&releases, false)
                 .unwrap()
+                .1
                 .browser_download_url,
             "v2.3.0"
         );
@@ -190,12 +207,14 @@ mod tests {
         assert_eq!(
             select_manifest(&releases, false)
                 .unwrap()
+                .1
                 .browser_download_url,
             "v2.0.0"
         );
         assert_eq!(
             select_manifest(&releases, true)
                 .unwrap()
+                .1
                 .browser_download_url,
             "v3.0.0-beta.1"
         );
