@@ -8,6 +8,9 @@ on:
       tag:
         type: string
         default: ''
+      source_ref:
+        type: string
+        default: ''
     secrets:
       TAURI_SIGNING_PRIVATE_KEY:
         required: false
@@ -33,6 +36,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -48,6 +53,28 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm audit --omit=dev
+      - name: fetch verified nsis tools through the release api
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tools = Join-Path $env:LOCALAPPDATA 'tauri'
+          $stage = Join-Path $env:RUNNER_TEMP 'kawaicord-nsis'
+          New-Item -ItemType Directory -Force $stage, $tools | Out-Null
+          gh release download nsis-3.13 -R tauri-apps/binary-releases -p nsis-3.13.zip -D $stage
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS download failed' }
+          gh release download nsis_tauri_utils-v0.5.3 -R tauri-apps/nsis-tauri-utils -p nsis_tauri_utils.dll -D $stage
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS plugin download failed' }
+          $zip = Join-Path $stage 'nsis-3.13.zip'
+          $plugin = Join-Path $stage 'nsis_tauri_utils.dll'
+          if ((Get-FileHash $zip).Hash -ne 'BA63DFFC4410EE89193E1CB5A41989991BD77C61068DA17E3156D136B7B0B3D8') { throw 'NSIS checksum mismatch' }
+          if ((Get-FileHash $plugin).Hash -ne '5BA143B5DB4A87D32D6E7802E033330AAE56CBCEABE0D1E3BA41948385AD4709') { throw 'NSIS plugin checksum mismatch' }
+          Expand-Archive $zip $stage
+          Move-Item (Join-Path $stage 'nsis-3.13') (Join-Path $tools 'NSIS')
+          $additional = Join-Path $tools 'NSIS\Plugins\x86-unicode\additional'
+          New-Item -ItemType Directory -Force $additional | Out-Null
+          Copy-Item $plugin $additional
       - name: build packages
         uses: tauri-apps/tauri-action@v1
         env:
@@ -87,6 +114,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_ref || github.sha }}
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -104,7 +133,7 @@ jobs:
       - name: chromium packaging and audio test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 libatspi2.0-0 libdrm2 libgbm1 libasound2 libfuse2 xdg-utils xvfb pulseaudio openbox x11-utils dbus
+          sudo apt-get install -y libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 libatspi2.0-0 libdrm2 libgbm1 libasound2 libfuse2 xdg-utils xvfb pulseaudio openbox x11-utils dbus p7zip-full
       - run: npm ci
       - run: npm run build
       - run: node --test tests/*.test.mjs
@@ -125,7 +154,25 @@ jobs:
       - name: audit packaging tools
         run: npm audit --prefix linux-host --audit-level=high
       - run: node --test tests/linux-host.test.mjs
-      - run: npm run package --prefix linux-host
+      - name: seed verified linux packaging archives through the release api
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          appimage="$RUNNER_TEMP/electron-builder/appimage-12.0.1"
+          fpm="$RUNNER_TEMP/fpm"
+          mkdir -p "$appimage" "$fpm"
+          gh release download appimage-12.0.1 -R electron-userland/electron-builder-binaries -p appimage-12.0.1.7z -D "$appimage"
+          gh release download fpm@2.1.4 -R electron-userland/electron-builder-binaries -p fpm-1.17.0-ruby-3.4.3-linux-amd64.7z -D "$fpm"
+          sha256sum -c <<EOF
+          d12ff7eb8f1d1ec4652ca5237a7fbdca33acc0c758045636feca62dc6ecb8ec4  $appimage/appimage-12.0.1.7z
+          44b0ec6025c14ec137f56180e62675c0eae36233cdce53d0953d9c73ced8989f  $fpm/fpm-1.17.0-ruby-3.4.3-linux-amd64.7z
+          EOF
+          7z x "$fpm/fpm-1.17.0-ruby-3.4.3-linux-amd64.7z" "-o$fpm" >/dev/null
+          test -x "$fpm/fpm"
+          echo "ELECTRON_BUILDER_CACHE=$RUNNER_TEMP/electron-builder" >> "$GITHUB_ENV"
+          echo "ELECTRON_BUILDER_7ZIP_PATH=$(command -v 7z)" >> "$GITHUB_ENV"
+          echo "CUSTOM_FPM_PATH=$fpm/fpm" >> "$GITHUB_ENV"
+      - run: npm run package --prefix linux-host -- --publish never
       - name: live discord startup with all three mods
         run: xvfb-run -a node scripts/linux-session.mjs linux-host/release/linux-unpacked/kawaicord
       - name: packaged voice engine and real audio loopback

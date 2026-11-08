@@ -2,23 +2,32 @@ name: release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: existing release tag to rebuild and publish
+        type: string
+        required: true
 permissions:
   contents: write
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 jobs:
   native:
     uses: ./.github/workflows/native.yml
     with:
       release: true
-      tag: ${{ github.ref_name }}
+      tag: ${{ inputs.tag || github.ref_name }}
+      source_ref: refs/tags/${{ inputs.tag || github.ref_name }}
     secrets: inherit
   publish:
     needs: native
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.tag || github.ref_name }}
       - uses: actions/download-artifact@v6
         with:
           name: kawaicord-linux
@@ -26,15 +35,17 @@ jobs:
       - name: add linux packages and merge the signed updater manifest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/publish-linux.mjs linux-artifacts
+          KAWAICORD_RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: env GITHUB_REF_NAME="$KAWAICORD_RELEASE_TAG" node scripts/publish-linux.mjs linux-artifacts
       - name: publish after every platform passes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KAWAICORD_RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           version=$(node -p "require('./package.json').version")
-          test "v$version" = "$GITHUB_REF_NAME"
+          test "v$version" = "$KAWAICORD_RELEASE_TAG"
           if [[ "$version" == *-* ]]; then
-            gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease --latest=false --notes-file RELEASE_NOTES.md --repo "$GITHUB_REPOSITORY"
+            gh release edit "$KAWAICORD_RELEASE_TAG" --draft=false --prerelease --latest=false --notes-file RELEASE_NOTES.md --repo "$GITHUB_REPOSITORY"
           else
-            gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease=false --latest --notes-file RELEASE_NOTES.md --repo "$GITHUB_REPOSITORY"
+            gh release edit "$KAWAICORD_RELEASE_TAG" --draft=false --prerelease=false --latest --notes-file RELEASE_NOTES.md --repo "$GITHUB_REPOSITORY"
           fi
